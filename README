@@ -1,0 +1,39 @@
+snth-10DD
+snth <snth@snthhacks.com>
+=========================
+
+Firmware for ATtiny13 and ATtiny85 -based flashlight drivers that includes some
+interesting features while still fitting in the meager 1KiB of flash program
+memory on the ATtiny13.
+
+A firmware initially designed for the ATTiny13A-based MTN-10DD board: A small
+board that can fit in slim AAA/10440 flashlights such as the SingFire-348.
+Written in AVR assembly.
+
+License
+-------
+
+snth-10DD is completely free and public domain. See the LICENSE file.
+
+Requirements
+------------
+
+ - avr-gcc
+ - avr-libc
+ - avr-binutils
+ - avrdude (for flashing the microcontroller)
+
+Learning AVR assembly
+---------------------
+
+In addition to the part datasheet and the AVR Instruction Set Manual, these are
+some resources I found helpful in learning to program AVRs in assembly:
+
+ - http://www.elektronik-labor.de/AVR/KursAssembler/T13asm13.html
+   - A cute tutorial which also includes a brief introduction to the actual
+     machine code and the SPI programming protocol.
+   - In German, but I found the Google Translate English translation usable.
+   - Does not use GNU as / avr-gcc, so you will want to reference
+     https://sourceware.org/binutils/docs/as/[the GNU as manual] (or `info as`).
+ - http://www.nongnu.org/avr-libc/user-manual/assembler.html
+   - Example of how to use avr-gcc and avr-libc for assembly.
