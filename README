@@ -33,6 +33,8 @@ some resources I found helpful in learning to program AVRs in assembly:
    - A cute tutorial which also includes a brief introduction to the actual
      machine code and the SPI programming protocol.
    - In German, but I found the Google Translate English translation usable.
+     - Sometimes the assembly source gets translated, so one may want to
+       cross-reference the untranslated version there.
    - Does not use GNU as / avr-gcc, so you will want to reference
      https://sourceware.org/binutils/docs/as/[the GNU as manual] (or `info as`).
  - http://www.nongnu.org/avr-libc/user-manual/assembler.html
