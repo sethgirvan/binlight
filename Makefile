@@ -10,7 +10,7 @@ PROGRAMMER ?= usbasp
 CPPFLAGS ?= -DF_CPU=$(F_CPU)
 CFLAGS ?= $(CPPFLAGS) -mmcu=$(MCU)
 
-LDFLAGS = -mmcu=$(MCU)
+LDFLAGS = -mmcu=$(MCU) -nostdlib
 
 OBJECTS ?= main.o
 
