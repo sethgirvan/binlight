@@ -1,0 +1,19 @@
+ - Quick Modes
+   - Quick modes are entered by cycling power to the driver multiple times in
+     quick succession: ie with on time less than the CFG_QUICK_TIME
+     configuration and off time less than the normal off time (which depends on
+     the off time capacitance used and the value of CFG_OFF_TIME_V_THRESH).
+
+     For example, from any mode the first quick mode can be entered by quickly
+     turning the light off and on in a sequence of off-on-off-on (or starting
+     with the light off, on-off-on), the second quick mode with a sequence of
+     off-on-off-on-off-on, etc.
+
+     They are called "quick modes" because they can be entered quickly from any
+     other mode by quickly tapping the power switch a number of times.
+
+     Note that when entering a quick mode, the next normal mode will be entered
+     intermediately until the power is cycled again. For this reason, it may
+     be desirable to use less bright modes for the normal modes and more bright
+     modes for the quick modes if one wants to avoid an intermediate bright
+     flash when switching to a less bright mode.
