@@ -15,7 +15,7 @@
  * bit 3: reserved for mode increment overflow
  * bits 4-7: unused
  */
-.byte 0x05
+.byte 0x00
 
 /* 0x09 CFG_OFF_TIME_V_THRESH
  * Max value seems to result in around 600ms with a 1uF off-time capacitor. May
