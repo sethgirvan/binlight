@@ -19,9 +19,21 @@ Requirements
 ------------
 
  - avr-gcc
- - avr-libc
+ - avr-libc (Only for preprocessor macros: avr-libc is not linked with the
+   program.)
  - avr-binutils
  - avrdude (for flashing the microcontroller)
+
+Documentation
+-------------
+
+See `doc/usage.txt` for an explanation of how the modes are set up and the
+special functions provided
+
+Configuration
+-------------
+
+See `eeprom.S`.
 
 Learning AVR assembly
 ---------------------
@@ -33,8 +45,9 @@ some resources I found helpful in learning to program AVRs in assembly:
    - A cute tutorial which also includes a brief introduction to the actual
      machine code and the SPI programming protocol.
    - In German, but I found the Google Translate English translation usable.
-     - Sometimes the assembly source gets translated, so one may want to
-       cross-reference the untranslated version there.
+     - Sometimes the opcodes and stuff in the assembly source get translated, so
+       one may want to cross-reference the untranslated version's program
+       listings.
    - Does not use GNU as / avr-gcc, so you will want to reference
      https://sourceware.org/binutils/docs/as/[the GNU as manual] (or `info as`).
  - http://www.nongnu.org/avr-libc/user-manual/assembler.html

@@ -17,3 +17,15 @@
      be desirable to use less bright modes for the normal modes and more bright
      modes for the quick modes if one wants to avoid an intermediate bright
      flash when switching to a less bright mode.
+
+ - Special function mode
+   - Special function mode allows performing one of the following special
+     functions:
+     - Indicate battery voltage
+     - Read from EEPROM (not yet implemented)
+     - Write to EEPROM (not yet implemented)
+     Some special functions that might be implemented in the future:
+     - Set timer
+     - Stopwatch
+     - Set Morse code buffer
+     - Output from Morse code buffer

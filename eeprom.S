@@ -1,8 +1,13 @@
+/*
+ * UNUSED locations are just locations that were being used to for some feature
+ * or something that no longer exists. They can be reused for new features.
+ */
+
 .section .eeprom,"ax",@progbits
 
 /* 0x00-0x07
  * Modes: PWM duty cycles */
-.byte 0x01, 0x03, 0x07, 0x0F, 0xFF, 0x3F, 0x7F, 0x1F
+.byte 0x01, 0x03, 0x07, 0xFD, 0xFF, 0x3F, 0x7F, 0x1F
 
 /* 0x08
  * MODE
@@ -55,3 +60,24 @@
 /* 0x11 SF_BRIGHT: Maximum PWM duty cycle used for indication during special
  * function mode. */
 .byte 0x1F
+
+/* 0x12 SF_STATE:  */
+.byte 0
+
+/* 0x13 UNUSED */
+.byte 0x00
+
+/* 0x14 CFG_SF_INDICATE_PERIOD: 1/2 the duration per bit (clock period) of
+ * special function mode output (in units of ~10 ms). */
+.byte 25
+
+/* 0x15 CFG_SF_INPUT_PERIOD: 1/2 the clock period for special function mode
+ * input (in units of ~10 ms). */
+.byte 50
+
+/* 0x16 INPUT_BIN_STATE_BITC: Count of bits read in so far by the input_bin()
+ * function. */
+.byte 0
+
+/* 0x17 INPUT_BIN_STATE_BUF: Buffer of bits read in so far by input_bin(). */
+.byte 0

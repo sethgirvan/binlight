@@ -36,6 +36,18 @@
  * PB1 (OC0B) is connected to the MOSFET gate and thus controls the LED on the
  * MTN-10DD driver board.
  *
+ * PB2 (ADC1) is connected through a resistor divider to the battery (Vin). On
+ * the MTN-10DD this resistor divider looks like:
+ *             _____       _____
+ *   (BAT+)---|19.1k|--*--|4.7k|---(BAT-)
+ *            ------   |  -----
+ *                     |
+ *                   (PB2)
+ *
+ * So the voltage seen at ADC1 = 4.7k / (4.k + 19.1k) ~= .1975 of Vin. ie using
+ * the 1.1V internal bandgap reference, the max value from the ADC corresponds
+ * to a Vin of ~5.5702V.
+ *
  * PB3 (ADC3) connects to the off-time sense capacitor. On the MTN-10DD driver,
  * this is a 10µF capacitor, but I find this gives too large of a minimum
  * off-time, so I am using a 1µF capacitor I am finding to result in a minimum
@@ -59,6 +71,14 @@
  * defined by CFG_QUICK_TIME). */
 #define MODE_QUICK 2
 #define MODE_OVERFLOW 3 /* MODE bit 3 reserved for mode bits overflow. */
+/* Special reserved mode duty cycle value which is used for special function
+ * mode. This means this duty cycle is not available for use. 0xFD is chosen
+ * because the maximum brightness, 0xFF, will be essentially indistinguishable.
+ * But 0xFE is also not chosen because for some E-switch-based driver
+ * configurations a 100% duty cycle may not work because because the driver
+ * power capacitor is only charged while the LED is off, so in that case 0xFE is
+ * the maximum usable brightness. */
+#define MODE_SF_VAL 0xFD
 
 #define CFG_OFF_TIME_V_THRESH_ADDR 0x09
 #define CFG_ON_TIME_ADDR 0x0A
@@ -71,12 +91,61 @@
 
 #define CFG_QUICK_TO_NONQUICK_MODE_ADDR 0x0F
 #define CFG_SF_BRIGHT_SET_TIME_ADDR 0x10
+#define CFG_SF_INDICATE_PERIOD_ADDR 0x14
+#define CFG_SF_INPUT_PERIOD_ADDR 0x15
 
 #define SF_BRIGHT_ADDR 0x11
+
+#define SF_STATE_ADDR 0x12
+
+/* States enumeration. States representing special functions selected by the
+ * user are ORed with 0x80 to keep them separate from auxiliary states that can
+ * only be entered internally. */
+#define SF_STATE_INIT 0x00 /* sf_clear_state assumes this is always 0. */
+#define SF_STATE_FSELECT 0x01 /* Read input to select function */
+#define SF_STATE_VBAT_INDICATE 0x80
+
+/* Determines maximum number of user-selectable special functions. 3 bits allows
+ * up to 8 special functions corresponding to SF_STATE enumeration values 0x00
+ * through 0x07. */
+#define SF_FSELECT_NBITS 3
+
+/* Bit pattern output when entering special function mode: The 4 bits '0101'
+ * (output from least to most significant bit, so output as 1 - 0 - 1 - 0). */
+#define SF_ENTERED_NBITS 4
+#define SF_ENTERED_PATTERN 0x05
+/* Bit pattern output to indicate a invalid special function selection has been
+ * made (output chronologically as 1 - 1 - 0 - 0). */
+#define SF_BAD_SEL_NBITS 4
+#define SF_BAD_SEL_PATTERN 0x03
+
+
+#define INPUT_BIN_STATE_BITC_ADDR 0x16
+#define INPUT_BIN_STATE_BUF_ADDR 0x17
 
 #define DEBUG_BYTE_ADDR 0x3F
 
 .section .text
+
+/*
+ * Register map:
+ *   r0: Always 0.
+ *   r2: ISR SREG storage. The value of the Status Register is not automatically
+ *       stored and restored when entering and returning from an Interrupt
+ *       Service Routine, so r2 is used to store it.
+ *   r3: Non-ISR SREG storage.
+ *   r20: Current mode number.
+ *   r23: Current mode brightness (PWM duty cycle). The value in the output
+ *        compare register (OCR0B) may differ from this value if the output is
+ *        being strobed or it is being modified for special function mode output
+ *        indication.
+ *   r30: Special function mode brightness set time remaining: on-time delay
+ *        (CFG_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the
+ *        current mode brightness is as the maximum brightness used for special
+ *        function mode output.
+ *   r31: Quick time remaining: on-time delay (CFG_QUICK_TIME) remaining (in
+ *        16ms WD ticks) until the next mode is switched away from quick mode.
+ */
 
 /*******************************************************************************
  * Interrupt vector table. Make sure to link with -nostdlib when using
@@ -91,7 +160,7 @@ reti /* EEPROM ready handler: unused */
 reti /* Analog Comparator handler: unused */
 reti /* timer/counter compare match A handler: unused */
 reti /* timer/counter compare match B handler: unused */
-reti /* watchdog timeout handler: unused */
+rjmp  int_wd /* watchdog timeout handler */
 reti /* ADC conversion complete handler: unused */
 
 /*******************************************************************************
@@ -110,6 +179,7 @@ dbe_eeprom_wait:
 	out _SFR_IO_ADDR(EEDR), r18
 	sbi _SFR_IO_ADDR(EECR), EEMPE
 	sbi _SFR_IO_ADDR(EECR), EEPE
+return: /* Arbitrary ret instruction that can be branched to. */
 	ret
 
 /*******************************************************************************
@@ -144,15 +214,23 @@ loop_10ms:
  *
  * Parameters:
  *   r17: EEPROM address of byte to load (0-63)
+ * Registers:
+ *   r3: SREG storage
  *
  * The resultant byte must be read from IO register EEDR.
  ******************************************************************************/
 eeprom_read:
+	in r3, _SFR_IO_ADDR(SREG)
+	cli
+
 eeprom_read_wait:
 	sbic _SFR_IO_ADDR(EECR), EEPE
 	rjmp eeprom_read_wait
 	out _SFR_IO_ADDR(EEARL), r17
 	sbi _SFR_IO_ADDR(EECR), EERE
+
+	out _SFR_IO_ADDR(SREG), r3
+
 	ret
 
 /*******************************************************************************
@@ -161,8 +239,14 @@ eeprom_read_wait:
  * Parameters:
  *   r17: EEPROM address to write byte to (0-63)
  *   r18: Value to write
+ *
+ * Registers:
+ *   r3: SREG storage
  ******************************************************************************/
 eeprom_write:
+	in r3, _SFR_IO_ADDR(SREG)
+	cli
+
 eeprom_write_wait:
 	sbic _SFR_IO_ADDR(EECR), EEPE
 	rjmp eeprom_write_wait
@@ -170,19 +254,290 @@ eeprom_write_wait:
 	out _SFR_IO_ADDR(EEDR), r18
 	sbi _SFR_IO_ADDR(EECR), EEMPE
 	sbi _SFR_IO_ADDR(EECR), EEPE
+
+	out _SFR_IO_ADDR(SREG), r3
+
 	ret
 
 /*******************************************************************************
  * Commit new MODE value to EEPROM
  *
  * Parameters:
- *   r20: new MODE value
+ *   r18: new MODE value
  * Registers:
- *   r17, r18: tmp
+ *   r17: tmp
  ******************************************************************************/
 mode_commit:
-	mov r18, r20
 	ldi r17, MODE_ADDR
+	rcall eeprom_write
+	ret
+
+/*******************************************************************************
+ * Commit a new SF_STATE value to EEPROM
+ *
+ * Paremeters:
+ *   r18: new SF_STATE value
+ * Registerts:
+ *   r17: tmp
+ ******************************************************************************/
+sf_state_commit:
+	ldi r17, SF_STATE_ADDR
+	rcall eeprom_write
+	ret
+
+/*******************************************************************************
+ * Indicate binary data by flashing the light.
+ *
+ * 0s are represented as a transition from 0% to 12.5% of SF_BRIGHT and 1s as a
+ * transition from 50% to 100% of SF_BRIGHT. For example for the sequence of
+ * 3 bits '011' (r17 = 3, r18 = 0x6):
+ * | bit 0  |   bit 1    |  bit 2   |
+ * 0% - 12.5% - 50% - 100% - 50% - 100%
+ *
+ * This scale is used (versus something like 0% to 25% and 50% to 100%) to try
+ * to match humans' logarithmic-y perception of brightness.
+ *
+ * Parameters:
+ *   r29: Number of bits to indicate (anything past 8 will just be padded with
+ *        trailing 0s).
+ *   r18: Data to output. Only the least significant r17 bits are used.
+ * Registers:
+ *   r16: 1/2 bit time period.
+ *   r19: Duty cycle for first half of bit
+ *   r21: Duty cycle for second half of bit
+ *
+ * Indirectly modified registers:
+ *   r23, r24
+ ******************************************************************************/
+indicate_bin:
+	ldi r17, CFG_SF_INDICATE_PERIOD_ADDR
+	rcall eeprom_read
+	in r16, _SFR_IO_ADDR(EEDR)
+indicate_bin_loop:
+	cpi r29, 0
+	breq indicate_bin_restore
+	sbrs r18, 0
+	rjmp indicate_0
+indicate_1:
+	/* 50% (rounding down) */
+	mov r19, r23
+	lsr r19
+	/* 100% */
+	mov r21, r23
+	rjmp indicate_endif
+indicate_0:
+	/* 0% */
+	clr r19
+	/* 12.5% (rounding down) */
+	mov r21, r23
+	lsr r21
+	lsr r21
+	lsr r21
+indicate_endif:
+	out _SFR_IO_ADDR(OCR0B), r19
+	rcall delay_10ms_tick
+	out _SFR_IO_ADDR(OCR0B), r21
+	rcall delay_10ms_tick
+
+	dec r29
+	lsr r18
+	rjmp indicate_bin_loop
+
+indicate_bin_restore:
+	out _SFR_IO_ADDR(OCR0B), r23
+	ret
+
+/*******************************************************************************
+ * Read binary data input by pushing the power switch.
+ *
+ * For each clock cycle (indicated to the user by flashing the light), if the
+ * switch is pressed, a 1 bit is shifted in from the right, otherwise a 0 bit is
+ * shifted in from the right.
+ *
+ * This function stores global state in EEPROM to keep track of which bit it is
+ * on, so it is not reentrant.
+ *
+ * This function only returns once all bits have been read in. If power is reset
+ * (due to the user tapping the power switch to input data), keep calling this
+ * function until it actually returns.
+ *
+ * Parameters:
+ *   r29: The number of bits to read in.
+ *
+ * Return:
+ *   r19: The bits read in, right adjusted and in chronological order from most
+ *        significant to least significant bit.
+ *
+ * Registers:
+ *   r16: 1/2 input bit period
+ *   r21: Number of bits read on so far
+ *
+ * Indirectly modified registers:
+ *   r23, r24
+ ******************************************************************************/
+input_bin:
+	ldi r17, CFG_SF_INPUT_PERIOD_ADDR
+	rcall eeprom_read
+	in r16, _SFR_IO_ADDR(EEDR)
+
+	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	rcall eeprom_read
+	in r19, _SFR_IO_ADDR(EEDR)
+
+	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	rcall eeprom_read
+	in r21, _SFR_IO_ADDR(EEDR)
+
+input_bin_loop:
+	cp r21, r29
+	brsh input_bin_done
+
+	lsl r19
+	ori r19, 1
+	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	mov r18, r19
+	rcall eeprom_write
+	inc r21
+	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	mov r18, r21
+	rcall eeprom_write
+
+	/* Flash light to provide a clock indication to the user. */
+	out _SFR_IO_ADDR(OCR0B), r0
+	rcall delay_10ms_tick
+	out _SFR_IO_ADDR(OCR0B), r23
+	rcall delay_10ms_tick
+
+	/* Switch was not pressed: considered a 0 bit. */
+	andi r19, ~1
+	/* Do not need to commit this to EEPROM yet, since it will be committed
+	 * before the next bit is read. */
+
+	rjmp input_bin_loop
+
+input_bin_done:
+	/* Done reading bits, reset EEPROM state for future calls. */
+	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	clr r18
+	rcall eeprom_write
+	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	rcall eeprom_write
+	ret
+
+/*******************************************************************************
+ * Calculate the next non-quick mode when currently not in a quick mode.
+ *
+ * Parameters:
+ *   r20: Current mode. Not modified.
+ * Return:
+ *   r18: Next non-quick mode.
+ ******************************************************************************/
+nonquick_next:
+	cpi r20, 0x03
+	brlo nonquick_inc
+	clr r18
+	ret
+
+nonquick_inc:
+	mov r18, r20
+	inc r18
+	ret
+
+/*******************************************************************************
+ * Set the next mode to the next nonquick mode.
+ ******************************************************************************/
+set_next_mode_nonquick:
+	sbrs r20, MODE_QUICK
+	rjmp set_next_nonquick_curr_nonquick
+
+	ldi r17, CFG_QUICK_TO_NONQUICK_MODE_ADDR
+	rcall eeprom_read
+	in r18, _SFR_IO_ADDR(EEDR)
+	rjmp set_next_nonquick_curr_quick_endif
+
+set_next_nonquick_curr_nonquick:
+	rcall nonquick_next
+
+	/* r18 holds next mode */
+set_next_nonquick_curr_quick_endif:
+	rcall mode_commit
+	ret
+
+/*******************************************************************************
+ * Until the quick mode on-time delay (CFG_QUICK_TIME) expires, the next mode is
+ * set to the next quick mode.
+ *
+ * Parameters:
+ *   r20: Current mode number
+ ******************************************************************************/
+set_next_mode:
+	sbrs r20, MODE_QUICK
+	rjmp set_next_curr_nonquick
+
+	/* Currently in quick mode, increment to next quick mode (wrapping). */
+	cpi r20, 0x07
+	brlo mode_quick_inc
+	ldi r18, 0x04
+	rjmp mode_quick_ovflw_endif
+mode_quick_inc:
+	mov r18, r20
+	inc r18
+mode_quick_ovflw_endif:
+	rjmp mode_next_quick_commit
+
+	/* Not in quick mode, set to first quick mode. */
+set_next_curr_nonquick:
+	ldi r18, 0x04
+
+mode_next_quick_commit:
+	rcall mode_commit
+
+	/* Setup quick mode on-time watchdog interrupt countdown, after the
+	 * expiration of which the next mode is set to a nonquick mode. */
+	ldi r17, CFG_QUICK_TIME_ADDR
+	rcall eeprom_read
+	in r31, _SFR_IO_ADDR(EEDR)
+
+	/* Setup up CFG_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
+	 * which  SF_BRIGHT will be to the current PWM duty cycle value. If
+	 * CFG_SF_BRIGHT_SET_TIME is 0, this is disabled. */
+	ldi r17, CFG_SF_BRIGHT_SET_TIME_ADDR
+	rcall eeprom_read
+	in r30, _SFR_IO_ADDR(EEDR)
+
+	sei
+	ret
+
+/*******************************************************************************
+ * Initialize PWM output from pin OC0B (PB1).
+ *
+ * Parameters:
+ *   r23: Duty cycle (0-255)
+ * Registers:
+ *   r17: temp
+ ******************************************************************************/
+timer_init:
+	out _SFR_IO_ADDR(OCR0B), r23
+	/* Clear OC0B (PB1 on this chip) on compare match, Fast PWM mode (mode
+	 * 3). */
+	ldi r17, BIT(COM0B1) | BIT(WGM01) | BIT(WGM00)
+	out _SFR_IO_ADDR(TCCR0A), r17
+	/* No clock prescaling. At F_CPU == 4.8MHz, gives a PWM frequency of
+	 * 4.8Mhz / 256 (ticks per cycle for 8-bit counter) = 18.75kHz. */
+	ldi r17, BIT(CS00)
+	out _SFR_IO_ADDR(TCCR0B), r17
+	ret
+
+/*******************************************************************************
+ * Reset state used by special function mode so it will be properly initialized
+ * next time special function mode is entered.
+ ******************************************************************************/
+sf_reset_state:
+	clr r18 /* We assume SF_STATE_INIT is always 0. */
+	rcall sf_state_commit
+	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	rcall eeprom_write
+	ldi r17, INPUT_BIN_STATE_BUF_ADDR
 	rcall eeprom_write
 	ret
 
@@ -190,29 +545,133 @@ mode_commit:
  * Activate the currently configured mode.
  *
  * Parameters:
- *   r16: MODE byte value
+ *   r20: MODE byte value
  ******************************************************************************/
 mode_activate:
-	/* Read duty cycle for configured mode number */
-	andi r16, MODE_MASK
-ma_eeprom_wait:
-	sbic _SFR_IO_ADDR(EECR), EEPE
-	rjmp ma_eeprom_wait
-	out _SFR_IO_ADDR(EEARL), r16
-	sbi _SFR_IO_ADDR(EECR), EERE
+	mov r17, r20
+	andi r17, MODE_MASK
+	rcall eeprom_read
 	in r23, _SFR_IO_ADDR(EEDR)
 
-timer_init:
-	/* Clear OC0B (PB1 on this chip) on compare match, Fast PWM mode (mode
-	 * 3). */
-	ldi r16, BIT(COM0B1) | BIT(WGM01) | BIT(WGM00)
-	out _SFR_IO_ADDR(TCCR0A), r16
-	/* No clock prescaling. At F_CPU == 4.8MHz, gives a PWM frequency of
-	 * 4.8Mhz / 256 (ticks per cycle for 8-bit counter) = 18.75kHz */
-	ldi r16, BIT(CS00)
-	out _SFR_IO_ADDR(TCCR0B), r16
-	out _SFR_IO_ADDR(OCR0B), r23
-	ret
+	cpi r23, MODE_SF_VAL
+	brne normal_mode
+sf_mode: /* Special function mode. */
+	ldi r17, SF_BRIGHT_ADDR
+	rcall eeprom_read
+	in r23, _SFR_IO_ADDR(EEDR)
+	rcall timer_init
+
+	ldi r17, SF_STATE_ADDR
+	rcall eeprom_read
+	in r18, _SFR_IO_ADDR(EEDR)
+sf_switch:
+	cpi r18, SF_STATE_INIT
+	breq sf_state_init
+	cpi r18, SF_STATE_FSELECT
+	breq sf_state_fselect
+	cpi r18, SF_STATE_VBAT_INDICATE
+	breq sf_state_vbat_indicate
+
+/* Output pattern to indicate a bad selection then retry selection input. */
+sf_state_bad_sel:
+	/* Can switch to next mode while this is being output. */
+	rcall set_next_mode_nonquick
+
+	ldi r29, SF_BAD_SEL_NBITS
+	ldi r18, SF_BAD_SEL_PATTERN
+	rcall indicate_bin
+
+	ldi r18, SF_STATE_FSELECT
+	rcall sf_state_commit
+	mov r18, r20
+	rcall mode_commit
+	rjmp sf_state_fselect
+
+/* Output pattern pattern indicating special function mode has been entered. */
+sf_state_init:
+	/* XXX May be undesirable to include the set SF_BRIGHT part of this
+	 * function in this case. */
+	rcall set_next_mode
+	ldi r29, SF_ENTERED_NBITS
+	ldi r18, SF_ENTERED_PATTERN
+	rcall indicate_bin
+
+	ldi r18, SF_STATE_FSELECT
+	rcall sf_state_commit
+
+	/* Disable asynchronous on-time-based mode-setting from WD interrupt. */
+	clr r30
+	clr r31
+	/* During the SF entered pattern, SF mode can be exit by switching
+	 * modes, but now input will be entered by tapping the power switch, so
+	 * to immediately exit special function mode one will have to let the
+	 * off-time expire. */
+	mov r18, r20
+	rcall mode_commit
+
+/* Read input to select function. */
+sf_state_fselect:
+	ldi r29, SF_FSELECT_NBITS
+	rcall input_bin
+	/* input_bin() loops internally as necessary until all bits have been
+	 * read. */
+
+	ldi r18, 0x80
+	or r18, r19
+	rcall sf_state_commit
+	rjmp sf_switch
+
+/* Battery voltage is repeatedly indicated in a loop, with some spacer
+ * indication to assist with viewer synchronization with the start of each
+ * voltage reading. Tapping the power switch at this point will switch to the
+ * next mode, exiting special function mode. */
+sf_state_vbat_indicate:
+	rcall set_next_mode_nonquick
+
+	/* Setup ADC for battery voltage sensing
+	 * - Use internal 1.1V bandgap reference
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC1 (PB2, VBat sense) */
+	ldi r16, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r16
+
+	/* Output the battery voltage repeatedly until the user switches modes.
+	 */
+vbat_read_loop:
+	/* Potential optimization: replace next two instructions with:
+	 *   sbi ADCSRA ADSC */
+	ldi r16, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	out _SFR_IO_ADDR(ADCSRA), r16
+
+	/* Might as well setup indicate_bin() args while waiting for the ADC. */
+	ldi r29, 8
+
+vbat_read_adc_wait:
+	sbic _SFR_IO_ADDR(ADCSRA), ADSC
+	rjmp vbat_read_adc_wait
+
+	in r18, _SFR_IO_ADDR(ADCH)
+	rcall indicate_bin
+
+	/* Output 4 1s after each voltage reading to help the user detect the
+	 * start of each voltage reading.
+	 *
+	 * Note: May want to consider doing some sort of "out-of-band"
+	 * indication instead such as completely turning of the light for a
+	 * period. */
+	ldi r29, 4
+	ldi r18, 0x0F
+	rcall indicate_bin
+
+	rjmp vbat_read_loop
+
+normal_mode:
+	rcall timer_init
+	rcall sf_reset_state
+	rcall set_next_mode
+inf_loop:
+	rjmp inf_loop
 
 /*******************************************************************************
  * main
@@ -224,6 +683,9 @@ timer_init:
  ******************************************************************************/
 .global main
 main:
+	/* Setup registers */
+	clr r0
+
 	/* Setup output pins */
 	ldi r16, BIT(PB1)
 	out _SFR_IO_ADDR(DDRB), r16
@@ -232,6 +694,16 @@ main:
 	/* Disable digital input on our ADC pins to save power. */
 	ldi r16, BIT(ADC3D) | BIT(ADC1D)
 	out _SFR_IO_ADDR(DIDR0), r16
+
+	/* Enable watchdog timer interrupt (used for some async operations).
+	 * WDP[3:0] left as 0 to give a prescaling of 2048 cycles of the
+	 * watchdog (128kHz) timer, resulting in a period of 16ms.
+	 *
+	 * The global interrupt enable will not be set until the quick mode and
+	 * special function brightness set expiration data is set in
+	 * set_next_mode(). */
+	ldi r16, BIT(WDTIE)
+	out _SFR_IO_ADDR(WDTCR), r16
 
 	/* Read mode */
 	ldi r17, MODE_ADDR
@@ -249,25 +721,21 @@ main:
  * On-time control
  ******************************************************************************/
 ctrl_on_time:
-	mov r16, r20 /* save current mode in r16 */
 	rcall mode_activate
-	inc r20
-	andi r20, ~BIT(MODE_OVERFLOW)
+	mov r18, r20
+	inc r18
+	andi r18, ~BIT(MODE_OVERFLOW)
 	rcall mode_commit
 
 	/* Read on-time setting into r16. */
-	ldi r16, CFG_ON_TIME_ADDR
-cont_eeprom_wait:
-	sbic _SFR_IO_ADDR(EECR), EEPE
-	rjmp cont_eeprom_wait
-	out _SFR_IO_ADDR(EEARL), r16
-	sbi _SFR_IO_ADDR(EECR), EERE
+	ldi r17, CFG_ON_TIME_ADDR
+	rcall eeprom_read
 	in r16, _SFR_IO_ADDR(EEDR)
 	/* Wait on-time interval before resetting mode. Delay time is in r16. */
 	rcall delay_10ms_tick
 
 /* Reset mode */
-	andi r20, ~MODE_MASK
+	clr r18
 	rcall mode_commit
 
 	rjmp inf_loop
@@ -329,79 +797,55 @@ off_time_adc_wait:
 	andi r20, ~MODE_MASK
 
 off_time_endif:
-	/* r16 contains current MODE value, r20 will be next MODE value. */
-	mov r16, r20
 	rcall mode_activate
 
 /*
- * Until the quick mode on-time delay (CFG_QUICK_TIME) expires, the next mode is
- * set to the next quick mode.
+ * Watchdog timeout interrupt handler.
+ *
+ * The watchdog timer prescaler is set such that this interrupt is triggered
+ * every 16ms: a 16ms "WD tick".
+ *
+ * Handles quick mode expiration, special function mode brightness on-time.
+ *
+ * Registers:
+ *   r2: SREG storage
+ *   r31: Quick time remaining.
+ *   r20: Next nonquick mode
+ *   r16 r17, r18: temp; original values restored before returning.
  */
-mode_next_quick:
-	sbrs r20, MODE_QUICK
-	rjmp curr_nonquick
-
-	/* Currently in quick mode, increment to next quick mode (wrapping). */
-	cpi r20, 0x07
-	brlo mode_quick_inc
-	ldi r20, 0x04
-	rjmp mode_quick_ovflw_endif
-mode_quick_inc:
-	inc r20
-mode_quick_ovflw_endif:
-	/* Store next non-quick mode on the stack. It will be used if the quick
-	 * mode delay expires. */
-	ldi r17, CFG_QUICK_TO_NONQUICK_MODE_ADDR
-	rcall eeprom_read
-	in r17, _SFR_IO_ADDR(EEDR)
+int_wd:
+	in r2, _SFR_IO_ADDR(SREG)
+	push r16
 	push r17
-	rjmp mode_next_quick_commit
+	push r18
 
-	/* Not in quick mode, set to first quick mode. */
-curr_nonquick:
-	cpi r20, 0x03
-	brlo nonquick_inc
-	clr r20
-	rjmp nonquick_ovflw_endif
-nonquick_inc:
-	inc r20
-nonquick_ovflw_endif:
-	/* Push next non-quick mode to be restored if quick mode delay expires.
-	 */
-	push r20
-	ldi r20, 0x04
+	/* Quick mode on-time */
+	cpi r31, 0
+	breq quick_mode_endif
+	dec r31
+	cpi r31, 0
+	brne quick_mode_expire_endif
+	rcall set_next_mode_nonquick
+quick_mode_expire_endif:
+quick_mode_endif:
 
-mode_next_quick_commit:
-	rcall mode_commit
-
-	/* Wait for quick mode interval to expire, then set next mode to non
-	 * quick mode. */
-
-	ldi r17, CFG_QUICK_TIME_ADDR
-	rcall eeprom_read
-	in r16, _SFR_IO_ADDR(EEDR)
-	rcall delay_10ms_tick
-
-	/* Restore pushed non-quick mode. */
-	pop r20
-	rcall mode_commit
-
-	/* Wait for CFG_SF_BRIGHT_SET_TIME, then set SF_BRIGHT to the current
-	 * PWM duty cycle value. If CFG_SF_BRIGHT_SET_TIME is 0, this is
-	 * disabled. */
-	ldi r17, CFG_SF_BRIGHT_SET_TIME_ADDR
-	rcall eeprom_read
-	in r16, _SFR_IO_ADDR(EEDR)
-	cpi r16, 0
-	breq prgm_bright_set_endif
-	rcall delay_10ms_tick
+	/* Special function mode brightness set on-time */
+	cpi r30, 0
+	breq sf_bright_endif
+	dec r30
+	cpi r30, 0
+	brne sf_bright_expire_endif
 	ldi r17, SF_BRIGHT_ADDR
-	in r18, _SFR_IO_ADDR(OCR0B)
+	mov r18, r23
 	rcall eeprom_write
-prgm_bright_set_endif:
+sf_bright_expire_endif:
+sf_bright_endif:
 
-inf_loop:
-	rjmp inf_loop
+	pop r18
+	pop r17
+	pop r16
+	out _SFR_IO_ADDR(SREG), r2
+	reti
 
 .global verstr
 verstr:
