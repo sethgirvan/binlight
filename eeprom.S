@@ -73,7 +73,7 @@
 
 /* 0x15 CFG_SF_INPUT_PERIOD: 1/2 the clock period for special function mode
  * input (in units of ~10 ms). */
-.byte 50
+.byte 25
 
 /* 0x16 INPUT_BIN_STATE_BITC: Count of bits read in so far by the input_bin()
  * function. */
