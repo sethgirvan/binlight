@@ -135,10 +135,10 @@
  *       Service Routine, so r2 is used to store it.
  *   r3: Non-ISR SREG storage.
  *   r20: Current mode number.
- *   r23: Current mode brightness (PWM duty cycle). The value in the output
- *        compare register (OCR0B) may differ from this value if the output is
- *        being strobed or it is being modified for special function mode output
- *        indication.
+ *   r23: Current mode brightness (PWM duty cycle). The complement of the value
+ *        in the output compare register (OCR0B) may differ from this value if
+ *        the output is being strobed or it is being modified for special
+ *        function mode output indication.
  *   r30: Special function mode brightness set time remaining: on-time delay
  *        (CFG_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the
  *        current mode brightness is as the maximum brightness used for special
@@ -334,9 +334,11 @@ indicate_0:
 	lsr r21
 	lsr r21
 indicate_endif:
-	out _SFR_IO_ADDR(OCR0B), r19
+	mov r17, r19
+	rcall pwm_set
 	rcall delay_10ms_tick
-	out _SFR_IO_ADDR(OCR0B), r21
+	mov r17, r21
+	rcall pwm_set
 	rcall delay_10ms_tick
 
 	dec r29
@@ -344,7 +346,8 @@ indicate_endif:
 	rjmp indicate_bin_loop
 
 indicate_bin_restore:
-	out _SFR_IO_ADDR(OCR0B), r23
+	mov r17, r23
+	rcall pwm_set
 	ret
 
 /*******************************************************************************
@@ -403,9 +406,11 @@ input_bin_loop:
 	rcall eeprom_write
 
 	/* Flash light to provide a clock indication to the user. */
-	out _SFR_IO_ADDR(OCR0B), r0
+	clr r17
+	rcall pwm_set
 	rcall delay_10ms_tick
-	out _SFR_IO_ADDR(OCR0B), r23
+	mov r17, r23
+	rcall pwm_set
 	rcall delay_10ms_tick
 
 	/* Switch was not pressed: considered a 0 bit. */
@@ -509,6 +514,23 @@ mode_next_quick_commit:
 	ret
 
 /*******************************************************************************
+ * Set the PWM duty cycle of the light.
+ *
+ * Parameters:
+ *   r17: Duty cycle = r17 / 256
+ *        The max duty cycle is 255/256 ~= 99.6%. See the comment in
+ *        timer_init() about this.
+ *
+ * Because we are using set on compare match mode, lower values of OCR0B result
+ * in higher duty cycles, so we need to use 255 minus the passed duty cycle
+ * value.
+ ******************************************************************************/
+pwm_set:
+	com r17
+	out _SFR_IO_ADDR(OCR0B), r17
+	ret
+
+/*******************************************************************************
  * Initialize PWM output from pin OC0B (PB1).
  *
  * Parameters:
@@ -517,10 +539,24 @@ mode_next_quick_commit:
  *   r17: temp
  ******************************************************************************/
 timer_init:
-	out _SFR_IO_ADDR(OCR0B), r23
-	/* Clear OC0B (PB1 on this chip) on compare match, Fast PWM mode (mode
-	 * 3). */
-	ldi r17, BIT(COM0B1) | BIT(WGM01) | BIT(WGM00)
+	mov r17, r23
+	rcall pwm_set
+	/* Set OC0B (PB1 on this chip) on compare match, Fast PWM mode (mode 3).
+	 *
+	 * Note that the set OC0B on compare match ([COM0B1:COM0B0] = '11') mode
+	 * means the minimum duty cycle is 0% (OCR0B = 255), and the maximum
+	 * duty cycle is ~99.6% (OCR0B = 0). The alternative is clear OC0B on
+	 * compare match ([COM0B1:COM0B0] = '10') mode which results in a
+	 * minimum duty cycle of ~.4% (OCR0B = 0) and a maximum duty cycle of
+	 * 100% (OCR0B = 255).
+	 *
+	 * I have chosen the set on compare match mode because I want the
+	 * ability to output true zero brightness in some cases such as when
+	 * indicating binary data. This means that lower OCR0B values result in
+	 * a higher duty cycle:
+	 *   Duty cycle = (255 - OCR0B) / 256
+	 */
+	ldi r17, BIT(COM0B1) | BIT(COM0B0) | BIT(WGM01) | BIT(WGM00)
 	out _SFR_IO_ADDR(TCCR0A), r17
 	/* No clock prescaling. At F_CPU == 4.8MHz, gives a PWM frequency of
 	 * 4.8Mhz / 256 (ticks per cycle for 8-bit counter) = 18.75kHz. */
