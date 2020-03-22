@@ -104,6 +104,8 @@
 #define SF_STATE_INIT 0x00 /* sf_clear_state assumes this is always 0. */
 #define SF_STATE_FSELECT 0x01 /* Read input to select function */
 #define SF_STATE_VBAT_INDICATE 0x80
+#define SF_STATE_EEPROM_READ 0x81
+#define SF_STATE_EEPROM_WRITE 0x82
 
 /* Determines maximum number of user-selectable special functions. 3 bits allows
  * up to 8 special functions corresponding to SF_STATE enumeration values 0x00
@@ -300,7 +302,7 @@ sf_state_commit:
  * Parameters:
  *   r29: Number of bits to indicate (anything past 8 will just be padded with
  *        trailing 0s).
- *   r18: Data to output. Only the least significant r17 bits are used.
+ *   r18: Data to output. The least significant bits are used.
  * Registers:
  *   r16: 1/2 bit time period.
  *   r19: Duty cycle for first half of bit
@@ -450,6 +452,12 @@ nonquick_inc:
 
 /*******************************************************************************
  * Set the next mode to the next nonquick mode.
+ *
+ * Parameters:
+ *   r20: Current mode
+ *
+ * Registers:
+ *   r17, r18: temp
  ******************************************************************************/
 set_next_mode_nonquick:
 	sbrs r20, MODE_QUICK
@@ -590,7 +598,15 @@ mode_activate:
 	in r23, _SFR_IO_ADDR(EEDR)
 
 	cpi r23, MODE_SF_VAL
-	brne normal_mode
+	breq sf_mode
+
+normal_mode:
+	rcall timer_init
+	rcall sf_reset_state
+	rcall set_next_mode
+inf_loop:
+	rjmp inf_loop
+
 sf_mode: /* Special function mode. */
 	ldi r17, SF_BRIGHT_ADDR
 	rcall eeprom_read
@@ -607,6 +623,8 @@ sf_switch:
 	breq sf_state_fselect
 	cpi r18, SF_STATE_VBAT_INDICATE
 	breq sf_state_vbat_indicate
+	cpi r18, SF_STATE_EEPROM_READ
+	breq sf_state_eeprom_read
 
 /* Output pattern to indicate a bad selection then retry selection input. */
 sf_state_bad_sel:
@@ -702,12 +720,27 @@ vbat_read_adc_wait:
 
 	rjmp vbat_read_loop
 
-normal_mode:
-	rcall timer_init
-	rcall sf_reset_state
-	rcall set_next_mode
-inf_loop:
-	rjmp inf_loop
+/* Read a bytes starting from from a specified EEPROM address. Bytes are
+ * continuously output sequentially and looping around from address 0x3F back to
+ * 0x00 until the mode is switched.
+ *
+ * May want to put some sort of synchronization signal between bytes or even
+ * output the address before subsequent bytes after the first byte. */
+sf_state_eeprom_read:
+	ldi r29, 6 /* 64 bytes of EEPROM on the ATtiny13(a) */
+	rcall input_bin
+	mov r28, r19
+	/* Can switch to next mode now while data is being output. */
+	rcall set_next_mode_nonquick
+loop_sf_eeprom_read:
+	mov r17, r28
+	rcall eeprom_read
+	in r18, _SFR_IO_ADDR(EEDR)
+	ldi r29, 8
+	rcall indicate_bin
+	inc r28
+	andi r28, 0x3F
+	rjmp loop_sf_eeprom_read
 
 /*******************************************************************************
  * main
@@ -847,11 +880,12 @@ off_time_endif:
  *   r2: SREG storage
  *   r31: Quick time remaining.
  *   r20: Next nonquick mode
- *   r16 r17, r18: temp; original values restored before returning.
+ *   r3 r17, r18: temp; original values restored before returning. (r3 is used
+ *                for SREG storage by eeprom_read and eeprom_write.)
  */
 int_wd:
 	in r2, _SFR_IO_ADDR(SREG)
-	push r16
+	push r3
 	push r17
 	push r18
 
@@ -879,7 +913,7 @@ sf_bright_endif:
 
 	pop r18
 	pop r17
-	pop r16
+	pop r3
 	out _SFR_IO_ADDR(SREG), r2
 	reti
 
