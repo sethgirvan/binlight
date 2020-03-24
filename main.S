@@ -97,15 +97,18 @@
 #define SF_BRIGHT_ADDR 0x11
 
 #define SF_STATE_ADDR 0x12
+#define SF_STATE_EEPROM_WRITE_LOC_ADDR 0x13
 
-/* States enumeration. States representing special functions selected by the
- * user are ORed with 0x80 to keep them separate from auxiliary states that can
- * only be entered internally. */
-#define SF_STATE_INIT 0x00 /* sf_clear_state assumes this is always 0. */
-#define SF_STATE_FSELECT 0x01 /* Read input to select function */
-#define SF_STATE_VBAT_INDICATE 0x80
-#define SF_STATE_EEPROM_READ 0x81
-#define SF_STATE_EEPROM_WRITE 0x82
+/* States enumeration. States 0x00 through 0x07 are reserved for special
+ * functions that can be selected by the user. Auxiliary states that can only be
+ * entered internally begin at 0x08. */
+#define SF_STATE_VBAT_INDICATE 0x00
+#define SF_STATE_EEPROM_READ 0x01
+#define SF_STATE_EEPROM_WRITE 0x02
+#define SF_STATE_INIT 0x08
+#define SF_STATE_FSELECT 0x09 /* Read input to select function */
+#define SF_STATE_RETRY_SEL 0x0A
+#define SF_STATE_EEPROM_WRITE_VAL 0x0B
 
 /* Determines maximum number of user-selectable special functions. 3 bits allows
  * up to 8 special functions corresponding to SF_STATE enumeration values 0x00
@@ -116,10 +119,10 @@
  * (output from least to most significant bit, so output as 1 - 0 - 1 - 0). */
 #define SF_ENTERED_NBITS 4
 #define SF_ENTERED_PATTERN 0x05
-/* Bit pattern output to indicate a invalid special function selection has been
- * made (output chronologically as 1 - 1 - 0 - 0). */
-#define SF_BAD_SEL_NBITS 4
-#define SF_BAD_SEL_PATTERN 0x03
+/* Bit pattern output to indicate that the special function selection will be
+ * retried (output chronologically as 1 - 1 - 0 - 0). */
+#define SF_RETRY_SEL_NBITS 4
+#define SF_RETRY_SEL_PATTERN 0x03
 
 
 #define INPUT_BIN_STATE_BITC_ADDR 0x16
@@ -136,17 +139,17 @@
  *       stored and restored when entering and returning from an Interrupt
  *       Service Routine, so r2 is used to store it.
  *   r3: Non-ISR SREG storage.
+ *   r4: Special function mode brightness set time remaining: on-time delay
+ *       (CFG_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the current
+ *       mode brightness is set as the maximum brightness used for special
+ *       function mode output.
+ *   r5: Quick time remaining: on-time delay (CFG_QUICK_TIME) remaining (in
+ *       16ms WD ticks) until the next mode is switched to a non-quick mode.
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
  *        the output is being strobed or it is being modified for special
  *        function mode output indication.
- *   r30: Special function mode brightness set time remaining: on-time delay
- *        (CFG_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the
- *        current mode brightness is as the maximum brightness used for special
- *        function mode output.
- *   r31: Quick time remaining: on-time delay (CFG_QUICK_TIME) remaining (in
- *        16ms WD ticks) until the next mode is switched away from quick mode.
  */
 
 /*******************************************************************************
@@ -509,14 +512,14 @@ mode_next_quick_commit:
 	 * expiration of which the next mode is set to a nonquick mode. */
 	ldi r17, CFG_QUICK_TIME_ADDR
 	rcall eeprom_read
-	in r31, _SFR_IO_ADDR(EEDR)
+	in r5, _SFR_IO_ADDR(EEDR)
 
 	/* Setup up CFG_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
 	 * which  SF_BRIGHT will be to the current PWM duty cycle value. If
 	 * CFG_SF_BRIGHT_SET_TIME is 0, this is disabled. */
 	ldi r17, CFG_SF_BRIGHT_SET_TIME_ADDR
 	rcall eeprom_read
-	in r30, _SFR_IO_ADDR(EEDR)
+	in r4, _SFR_IO_ADDR(EEDR)
 
 	sei
 	ret
@@ -577,8 +580,9 @@ timer_init:
  * next time special function mode is entered.
  ******************************************************************************/
 sf_reset_state:
-	clr r18 /* We assume SF_STATE_INIT is always 0. */
+	ldi r18, SF_STATE_INIT
 	rcall sf_state_commit
+	clr r18
 	ldi r17, INPUT_BIN_STATE_BITC_ADDR
 	rcall eeprom_write
 	ldi r17, INPUT_BIN_STATE_BUF_ADDR
@@ -607,6 +611,7 @@ normal_mode:
 inf_loop:
 	rjmp inf_loop
 
+
 sf_mode: /* Special function mode. */
 	ldi r17, SF_BRIGHT_ADDR
 	rcall eeprom_read
@@ -616,23 +621,44 @@ sf_mode: /* Special function mode. */
 	ldi r17, SF_STATE_ADDR
 	rcall eeprom_read
 	in r18, _SFR_IO_ADDR(EEDR)
-sf_switch:
-	cpi r18, SF_STATE_INIT
-	breq sf_state_init
-	cpi r18, SF_STATE_FSELECT
-	breq sf_state_fselect
-	cpi r18, SF_STATE_VBAT_INDICATE
-	breq sf_state_vbat_indicate
-	cpi r18, SF_STATE_EEPROM_READ
-	breq sf_state_eeprom_read
 
-/* Output pattern to indicate a bad selection then retry selection input. */
-sf_state_bad_sel:
-	/* Can switch to next mode while this is being output. */
+sf_switch:
+	/* r30, r31 make up the Z register referenced by ijmp */
+	ldi r30, pm_lo8(sf_jmp_tbl)
+	ldi r31, pm_hi8(sf_jmp_tbl)
+	add r30, r18
+	brcc sf_jmp_tbl_addr_carry_endif
+	inc r31
+sf_jmp_tbl_addr_carry_endif:
+	ijmp
+
+sf_jmp_tbl:
+	/* 8 user-selectable special functions */
+	/* 0 */ rjmp sf_state_vbat_indicate
+	/* 1 */ rjmp sf_state_eeprom_read
+	/* 2 */ rjmp sf_state_eeprom_write
+	/* Unused special function slots */
+	/* 3 */ rjmp sf_state_retry_sel
+	/* 4 */ rjmp sf_state_retry_sel
+	/* 5 */ rjmp sf_state_retry_sel
+	/* 6 */ rjmp sf_state_retry_sel
+	/* 7 */ rjmp sf_state_retry_sel
+
+	/* Internal states */
+	/* 8 */ rjmp sf_state_init
+	/* 9 */ rjmp sf_state_fselect
+	/* A */ rjmp sf_state_retry_sel
+	/* B */ rjmp sf_state_eeprom_write_val
+
+
+/* Output pattern to indicate that special function selection will be retried.
+ */
+sf_state_retry_sel:
+	/* Can cancel by switching to next mode while this is being output. */
 	rcall set_next_mode_nonquick
 
-	ldi r29, SF_BAD_SEL_NBITS
-	ldi r18, SF_BAD_SEL_PATTERN
+	ldi r29, SF_RETRY_SEL_NBITS
+	ldi r18, SF_RETRY_SEL_PATTERN
 	rcall indicate_bin
 
 	ldi r18, SF_STATE_FSELECT
@@ -654,8 +680,8 @@ sf_state_init:
 	rcall sf_state_commit
 
 	/* Disable asynchronous on-time-based mode-setting from WD interrupt. */
-	clr r30
-	clr r31
+	clr r4
+	clr r5
 	/* During the SF entered pattern, SF mode can be exit by switching
 	 * modes, but now input will be entered by tapping the power switch, so
 	 * to immediately exit special function mode one will have to let the
@@ -670,8 +696,7 @@ sf_state_fselect:
 	/* input_bin() loops internally as necessary until all bits have been
 	 * read. */
 
-	ldi r18, 0x80
-	or r18, r19
+	mov r18, r19
 	rcall sf_state_commit
 	rjmp sf_switch
 
@@ -725,7 +750,11 @@ vbat_read_adc_wait:
  * 0x00 until the mode is switched.
  *
  * May want to put some sort of synchronization signal between bytes or even
- * output the address before subsequent bytes after the first byte. */
+ * output the address before subsequent bytes after the first byte.
+ *
+ * Registers:
+ *   r28: EEPROM address
+ */
 sf_state_eeprom_read:
 	ldi r29, 6 /* 64 bytes of EEPROM on the ATtiny13(a) */
 	rcall input_bin
@@ -741,6 +770,35 @@ loop_sf_eeprom_read:
 	inc r28
 	andi r28, 0x3F
 	rjmp loop_sf_eeprom_read
+
+/* Write a byte to the specified EEPROM address. */
+sf_state_eeprom_write:
+	/* select address */
+	ldi r29, 6
+	rcall input_bin
+	ldi r17, SF_STATE_EEPROM_WRITE_LOC_ADDR
+	mov r18, r19
+	rcall eeprom_write
+
+	ldi r18, SF_STATE_EEPROM_WRITE_VAL
+	rcall sf_state_commit
+
+sf_state_eeprom_write_val:
+	/* input byte value */
+	ldi r29, 8
+	rcall input_bin
+
+	/* write byte */
+	ldi r17, SF_STATE_EEPROM_WRITE_LOC_ADDR
+	rcall eeprom_read
+	in r17, _SFR_IO_ADDR(EEDR)
+	mov r18, r19
+	rcall eeprom_write
+
+	/* Query for user to select another special function. */
+	ldi r18, SF_STATE_RETRY_SEL
+	rcall sf_state_commit
+	rjmp sf_state_retry_sel
 
 /*******************************************************************************
  * main
@@ -878,7 +936,8 @@ off_time_endif:
  *
  * Registers:
  *   r2: SREG storage
- *   r31: Quick time remaining.
+ *   r4: Special function mode brightness set on-time delay remaining.
+ *   r5: Quick time remaining.
  *   r20: Next nonquick mode
  *   r3 r17, r18: temp; original values restored before returning. (r3 is used
  *                for SREG storage by eeprom_read and eeprom_write.)
@@ -890,26 +949,26 @@ int_wd:
 	push r18
 
 	/* Quick mode on-time */
-	cpi r31, 0
-	breq quick_mode_endif
-	dec r31
-	cpi r31, 0
-	brne quick_mode_expire_endif
+	cp r5, r0
+	breq wd_quick_mode_endif
+	dec r5
+	cp r5, r0
+	brne wd_quick_mode_expire_endif
 	rcall set_next_mode_nonquick
-quick_mode_expire_endif:
-quick_mode_endif:
+wd_quick_mode_expire_endif:
+wd_quick_mode_endif:
 
 	/* Special function mode brightness set on-time */
-	cpi r30, 0
-	breq sf_bright_endif
-	dec r30
-	cpi r30, 0
-	brne sf_bright_expire_endif
+	cp r4, r0
+	breq wd_sf_bright_endif
+	dec r4
+	cp r4, r0
+	brne wd_sf_bright_expire_endif
 	ldi r17, SF_BRIGHT_ADDR
 	mov r18, r23
 	rcall eeprom_write
-sf_bright_expire_endif:
-sf_bright_endif:
+wd_sf_bright_expire_endif:
+wd_sf_bright_endif:
 
 	pop r18
 	pop r17

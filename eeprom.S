@@ -54,7 +54,7 @@
  * current brightness (PWM duty cycle) is set as the maximum brightness used for
  * special function mode output. This delay is in addition to the CFG_QUICK_TIME
  * delay. Set to 0 to disable in which case the brightness used for special
- * function mode is fixed to the value set in PRGM_BRIGHT. */
+ * function mode is fixed to the value set in SF_BRIGHT. */
 .byte 250
 
 /* 0x11 SF_BRIGHT: Maximum PWM duty cycle used for indication during special
@@ -62,9 +62,10 @@
 .byte 0x1F
 
 /* 0x12 SF_STATE:  */
-.byte 0
+.byte 0x08 /* SF_STATE_INIT */
 
-/* 0x13 UNUSED */
+/* 0x13 SF_STATE_EEPROM_WRITE_LOC: EEPROM address (0x00-0x3F) the byte will be
+ * written to */
 .byte 0x00
 
 /* 0x14 CFG_SF_INDICATE_PERIOD: 1/2 the duration per bit (clock period) of
