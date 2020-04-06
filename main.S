@@ -58,6 +58,16 @@
 
 #define BIT(n) (1 << (n))
 
+/* Note that some configuration values are stored in EEPROM to allow
+ * modification by the user without a programmer by using the eeprom_write
+ * special function. The EEPROM address for those configuration values will be
+ * defined by a macro with suffix '_ADDR', and a description and the default
+ * value can be looked up in eeprom.S.
+ *
+ * Some configuration values have not been deemed worth making changeable in
+ * this way and thus require recompiling and reflashing to update.
+ */
+
 #ifndef F_CPU
 /* 4.8Mhz with CKSEL[1:0] bits (two least significant bits of the low fuse byte)
  * set to 0b01. */
@@ -80,9 +90,16 @@
  * the maximum usable brightness. */
 #define MODE_SF_VAL 0xFD
 
-#define CFG_OFF_TIME_V_THRESH_ADDR 0x09
+#define CFG_OFF_TIME_VTHRESH_ADDR 0x09
 #define CFG_ON_TIME_ADDR 0x0A
-#define CFG_V_BAT_LOW 0x0B
+
+#define CFG_VBAT_LOW_ADDR 0x0B
+#define CFG_BAT_LOW_BLINK_INTERVAL_ADDR 0x0C
+ /* Two consecutive blinks of the light indicate a low battery condition. */
+#define CFG_BAT_LOW_NBLINKS 2
+/* 1/2 period in units of 10 milliseconds of each of the blinks. */
+#define CFG_BAT_LOW_BLINK_PERIOD 10
+
 #define CFG_QUICK_TIME_ADDR 0x0D
 
 /* Bit field flags byte 0 */
@@ -123,7 +140,9 @@
  * retried (output chronologically as 1 - 1 - 0 - 0). */
 #define SF_RETRY_SEL_NBITS 4
 #define SF_RETRY_SEL_PATTERN 0x03
-
+/* Bit pattern output between battery voltage indications. */
+#define SF_VBAT_INDICATE_SYNC_NBITS 4
+#define SF_VBAT_INDICATE_SYNC_PATTERN 0x0E
 
 #define INPUT_BIN_STATE_BITC_ADDR 0x16
 #define INPUT_BIN_STATE_BUF_ADDR 0x17
@@ -169,49 +188,88 @@ rjmp  int_wd /* watchdog timeout handler */
 reti /* ADC conversion complete handler: unused */
 
 /*******************************************************************************
- * Write a value to the last byte (63) of the EEPROM to later be read out with
- * an external programmer for debugging purposes.
- *
- * Parameters:
- *   r18 - byte value
- ******************************************************************************/
-debug_byte_eeprom:
-	ldi r17, DEBUG_BYTE_ADDR
-dbe_eeprom_wait:
-	sbic _SFR_IO_ADDR(EECR), EEPE
-	rjmp dbe_eeprom_wait
-	out _SFR_IO_ADDR(EEARL), r17
-	out _SFR_IO_ADDR(EEDR), r18
-	sbi _SFR_IO_ADDR(EECR), EEMPE
-	sbi _SFR_IO_ADDR(EECR), EEPE
-return: /* Arbitrary ret instruction that can be branched to. */
-	ret
-
-/*******************************************************************************
  * Delay in units of approximately 10 milliseconds.
  * TODO Double-check loop timing.
  *
  * Parameters:
- *   r16: Delay approximately = r16 * 10ms
- * Registers used:
- *   r17, r24, r25
+ *   r16: Delay = approximately r16 * 10ms. Not modified.
+ * Registers:
+ *   r17, r24, r25: temp
  ******************************************************************************/
 delay_10ms_tick:
-	clr r17
-loop_delay:
-	clr r24
-	clr r25
-loop_10ms:
-	adiw r24, 1
-	/* 4800000Hz * .01s / 256 (adiw of r24 per increment of r25) /
-	 * 3 (cycles per loop) = 62.5. Round down since we have already overshot
-	 * due to setup time. */
-	cpi r25, 62
-	brlo loop_10ms
+	mov r17, r16
+delay_10ms_tick_loop:
+	subi r17, 1
+	brlo return
 
-	inc r17
-	cp r16, r17
-	brsh loop_delay
+	/* Loop iterations = (F_CPU/s / 100 (10ms) - 2 + 1) / 3 (cycles / iter)
+	 * The -2 is to account for the time for the final predicate check. The
+	 * +1 is to round to the nearest int. */
+#define DELAY_10MS_TICK_ITERS ((F_CPU / 100 - 2 + 1) / 3)
+	ldi r24, DELAY_10MS_TICK_ITERS % 256
+	ldi r25, DELAY_10MS_TICK_ITERS / 256
+loop_10ms:
+	sbiw r24, 1
+	brsh loop_10ms
+
+	rjmp delay_10ms_tick_loop
+
+return:
+	ret
+
+/*******************************************************************************
+ * Delay in units of approximately 10 seconds.
+ *
+ * Calls delay_10ms_tick for 2.5 seconds 4 times.
+ *
+ * Parameters:
+ *   r19: Delay = approximately r19 * 10s. Not modified.
+ * Registers:
+ *   r16, r18, r21: temp
+ * Indirectly modified registers:
+ *   r17, r24, r25
+ ******************************************************************************/
+delay_10s_tick:
+	ldi r16, 250
+	mov r18, r19
+delay_10s_tick_loop:
+	subi r18, 1
+	brlo return
+
+	ldi r21, 3
+loop_10s:
+	rcall delay_10ms_tick
+	subi r21, 1
+	brsh loop_10s
+
+	rjmp delay_10s_tick_loop
+
+/*******************************************************************************
+ * Read the battery voltage from ADC1 (PB2).
+ *
+ * Returns:
+ *   r18: battery voltage
+ ******************************************************************************/
+vbat_read:
+	/* - Use internal 1.1V bandgap reference
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC1 (PB2, VBat sense pin) */
+	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r18
+
+	/* Potential optimization: replace next two instructions with:
+	 *   sbi ADCSRA ADSC
+	 * assuming ADCSRA has already been configured by the off-time sense
+	 * code. */
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	out _SFR_IO_ADDR(ADCSRA), r18
+
+vbat_read_adc_wait:
+	sbic _SFR_IO_ADDR(ADCSRA), ADSC
+	rjmp vbat_read_adc_wait
+
+	in r18, _SFR_IO_ADDR(ADCH)
 	ret
 
 /*******************************************************************************
@@ -265,6 +323,20 @@ eeprom_write_wait:
 	ret
 
 /*******************************************************************************
+ * Write a value to the last byte (63) of EEPROM which can later be read out for
+ * debugging purposes.
+ *
+ * Parameters:
+ *   r18: byte value
+ * Registers:
+ *   r17: temp
+ ******************************************************************************/
+debug_byte_eeprom:
+	ldi r17, DEBUG_BYTE_ADDR
+	rcall eeprom_write
+	ret
+
+/*******************************************************************************
  * Commit new MODE value to EEPROM
  *
  * Parameters:
@@ -312,7 +384,7 @@ sf_state_commit:
  *   r21: Duty cycle for second half of bit
  *
  * Indirectly modified registers:
- *   r23, r24
+ *   r24, r25
  ******************************************************************************/
 indicate_bin:
 	ldi r17, CFG_SF_INDICATE_PERIOD_ADDR
@@ -608,6 +680,43 @@ normal_mode:
 	rcall timer_init
 	rcall sf_reset_state
 	rcall set_next_mode
+
+	/* Loop checking for battery voltage dropping below CFG_VBAT_LOW. */
+	ldi r17, CFG_BAT_LOW_BLINK_INTERVAL_ADDR
+	rcall eeprom_read
+	in r19, _SFR_IO_ADDR(EEDR) /* r19 is arg to delay_10s_tick */
+	/* CFG_BAT_LOW_BLINK_INTERVAL = 0 disables low bat indication blinks */
+	cpi r19, 0
+	breq inf_loop
+
+	ldi r17, CFG_VBAT_LOW_ADDR
+	rcall eeprom_read
+	in r15, _SFR_IO_ADDR(EEDR)
+check_vbat_loop:
+	rcall vbat_read
+	cp r18, r15
+	brsh check_vbat_loop
+
+vbat_low_indicate:
+	ldi r16, CFG_BAT_LOW_BLINK_PERIOD
+	ldi r21, CFG_BAT_LOW_NBLINKS
+vbat_low_blink_loop:
+	subi r21, 1
+	brlo vbat_low_blink_loop_done
+
+	clr r17
+	rcall pwm_set
+	rcall delay_10ms_tick
+	mov r17, r23
+	rcall pwm_set
+	rcall delay_10ms_tick
+	rjmp vbat_low_blink_loop
+
+vbat_low_blink_loop_done:
+	/* TODO Maybe sleep instead for the period to reduce power usage. */
+	rcall delay_10s_tick /* r19 contains CFG_BAT_LOW_BLINK_INTERVAL */
+	rjmp check_vbat_loop
+
 inf_loop:
 	rjmp inf_loop
 
@@ -627,9 +736,7 @@ sf_switch:
 	ldi r30, pm_lo8(sf_jmp_tbl)
 	ldi r31, pm_hi8(sf_jmp_tbl)
 	add r30, r18
-	brcc sf_jmp_tbl_addr_carry_endif
-	inc r31
-sf_jmp_tbl_addr_carry_endif:
+	adc r31, r0 /* propagate carry */
 	ijmp
 
 sf_jmp_tbl:
@@ -707,40 +814,21 @@ sf_state_fselect:
 sf_state_vbat_indicate:
 	rcall set_next_mode_nonquick
 
-	/* Setup ADC for battery voltage sensing
-	 * - Use internal 1.1V bandgap reference
-	 * - Left adjust the ADC result, so ADCH can just be read to get the
-	 *   most significant 8 bits.
-	 * - Enable ADC1 (PB2, VBat sense) */
-	ldi r16, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
-	out _SFR_IO_ADDR(ADMUX), r16
-
 	/* Output the battery voltage repeatedly until the user switches modes.
 	 */
 vbat_read_loop:
-	/* Potential optimization: replace next two instructions with:
-	 *   sbi ADCSRA ADSC */
-	ldi r16, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	out _SFR_IO_ADDR(ADCSRA), r16
-
-	/* Might as well setup indicate_bin() args while waiting for the ADC. */
+	rcall vbat_read
 	ldi r29, 8
-
-vbat_read_adc_wait:
-	sbic _SFR_IO_ADDR(ADCSRA), ADSC
-	rjmp vbat_read_adc_wait
-
-	in r18, _SFR_IO_ADDR(ADCH)
 	rcall indicate_bin
 
-	/* Output 4 1s after each voltage reading to help the user detect the
-	 * start of each voltage reading.
+	/* Output a bit pattern after each reading to help the user detect the
+	 * start of the next voltage reading.
 	 *
 	 * Note: May want to consider doing some sort of "out-of-band"
-	 * indication instead such as completely turning of the light for a
+	 * indication instead such as completely turning off the light for a
 	 * period. */
-	ldi r29, 4
-	ldi r18, 0x0F
+	ldi r29, SF_VBAT_INDICATE_SYNC_NBITS
+	ldi r18, SF_VBAT_INDICATE_SYNC_PATTERN
 	rcall indicate_bin
 
 	rjmp vbat_read_loop
@@ -897,7 +985,7 @@ ctrl_off_time:
 	out _SFR_IO_ADDR(ADCSRA), r16
 
 	/* Load off-time voltage threshold setting from EEPROM */
-	ldi r17, CFG_OFF_TIME_V_THRESH_ADDR
+	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
 	rcall eeprom_read
 	in r22, _SFR_IO_ADDR(EEDR)
 
