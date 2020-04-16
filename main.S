@@ -122,10 +122,13 @@
 #define SF_STATE_VBAT_INDICATE 0x00
 #define SF_STATE_EEPROM_READ 0x01
 #define SF_STATE_EEPROM_WRITE 0x02
+#define SF_STATE_OFF_TIME_SET 0x07
 #define SF_STATE_INIT 0x08
 #define SF_STATE_FSELECT 0x09 /* Read input to select function */
 #define SF_STATE_RETRY_SEL 0x0A
 #define SF_STATE_EEPROM_WRITE_VAL 0x0B
+/* Set CFG_OFF_TIME_VTHRESH to current off-time ADC value. */
+#define SF_STATE_OFF_TIME_SET_CURR 0x0C
 
 /* Determines maximum number of user-selectable special functions. 3 bits allows
  * up to 8 special functions corresponding to SF_STATE enumeration values 0x00
@@ -143,6 +146,12 @@
 /* Bit pattern output between battery voltage indications. */
 #define SF_VBAT_INDICATE_SYNC_NBITS 4
 #define SF_VBAT_INDICATE_SYNC_PATTERN 0x0E
+/* Bit pattern output to while waiting for the user to switch off the light in
+ * order to set the off time. The number of bits, combined with
+ * CFG_SF_INDICATE_PERIOD, determines how long we will wait before cancelling
+ * the operation. */
+#define SF_OFF_TIME_SET_WAIT_NBITS 8
+#define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
 #define INPUT_BIN_STATE_BITC_ADDR 0x16
 #define INPUT_BIN_STATE_BUF_ADDR 0x17
@@ -243,6 +252,35 @@ loop_10s:
 	brsh loop_10s
 
 	rjmp delay_10s_tick_loop
+
+/*******************************************************************************
+ * Read the off-time capacitor voltage from ADC3 (PB3).
+ *
+ * Returns:
+ *   r18: off-time capacitor voltage.
+ ******************************************************************************/
+vofft_read:
+	/* - Use the internal 1.1V bandgap reference.
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC3 (PB3, off-time sense) */
+	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX1) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r18
+	/* Start a single conversion. Division factor of 32 between the system
+	 * clock and the ADC input clock for an ADC input frequency of 150kHz
+	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
+	 * datasheet. */
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	out _SFR_IO_ADDR(ADCSRA), r18
+
+	/* Wait for ADC conversion to finish. It takes a total of 25 ADC clock
+	 * cycles for the first conversion, 13 for subsequent conversions. */
+off_time_adc_wait:
+	sbic _SFR_IO_ADDR(ADCSRA), ADSC
+	rjmp off_time_adc_wait
+
+	in r18, _SFR_IO_ADDR(ADCH)
+	ret
 
 /*******************************************************************************
  * Read the battery voltage from ADC1 (PB2).
@@ -698,7 +736,7 @@ check_vbat_loop:
 	brsh check_vbat_loop
 
 vbat_low_indicate:
-	ldi r16, CFG_BAT_LOW_BLINK_PERIOD
+	ldi r16, CFG_BAT_LOW_BLINK_PERIOD /* arg to delay_10ms_tick */
 	ldi r21, CFG_BAT_LOW_NBLINKS
 vbat_low_blink_loop:
 	subi r21, 1
@@ -749,13 +787,14 @@ sf_jmp_tbl:
 	/* 4 */ rjmp sf_state_retry_sel
 	/* 5 */ rjmp sf_state_retry_sel
 	/* 6 */ rjmp sf_state_retry_sel
-	/* 7 */ rjmp sf_state_retry_sel
+	/* 7 */ rjmp sf_state_off_time_set
 
 	/* Internal states */
 	/* 8 */ rjmp sf_state_init
 	/* 9 */ rjmp sf_state_fselect
 	/* A */ rjmp sf_state_retry_sel
 	/* B */ rjmp sf_state_eeprom_write_val
+	/* C */ rjmp sf_state_off_time_set_curr
 
 
 /* Output pattern to indicate that special function selection will be retried.
@@ -888,6 +927,38 @@ sf_state_eeprom_write_val:
 	rcall sf_state_commit
 	rjmp sf_state_retry_sel
 
+/* If the light is switched off while SF_OFF_TIME_SET_WAIT_PATTERN is being
+ * output, set CFG_OFF_TIME_VTHRESH to the current value of the off-time ADC
+ * upon turning back on.
+ *
+ * Note that ctrl_off_time includes special code to bypass the off-time
+ * expiration when in SF_STATE_OFF_TIME_SET_CURR. Otherwise, it would be
+ * impossible to increase the off-time this way because the mode would be reset
+ * and thus this special function cancelled when the off-time the user was
+ * trying to set exceeded the current off-time.
+ */
+sf_state_off_time_set:
+	ldi r18, SF_STATE_OFF_TIME_SET_CURR
+	rcall sf_state_commit
+	ldi r29, SF_OFF_TIME_SET_WAIT_NBITS
+	ldi r18, SF_OFF_TIME_SET_WAIT_PATTERN
+	rcall indicate_bin
+	/* User never turned off the light: cancel operation. Query for another
+	 * special function. */
+	ldi r18, SF_STATE_RETRY_SEL
+	rcall sf_state_commit
+	rjmp sf_state_retry_sel
+
+sf_state_off_time_set_curr:
+	rcall vofft_read
+	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
+	rcall eeprom_write
+
+	/* Query for the user to select another special function. */
+	ldi r18, SF_STATE_RETRY_SEL
+	rcall sf_state_commit
+	rjmp sf_state_retry_sel
+
 /*******************************************************************************
  * main
  *
@@ -962,7 +1033,7 @@ ctrl_on_time:
  * voltage on capacitor C2. C2 is selected such that while the driver is
  * unpowered, it discharges linearly enough over a sufficient range while
  * unpowered that we can measure the off time with reasonable accuracy over
- * configured off time which is usually somewhere in the range of .25 - 2
+ * configured off time which is usually somewhere in the range of .25 - 3
  * seconds.
  *
  * Registers:
@@ -970,42 +1041,31 @@ ctrl_on_time:
  * r21 - Sensed off-time voltage
  ******************************************************************************/
 ctrl_off_time:
-	/* Setup the ADC for off-time sensing
-	 * - Use the internal 1.1V bandgap reference.
-	 * - Left adjust the ADC result, so ADCH can just be read to get the
-	 *   most significant 8 bits.
-	 * - Enable ADC3 (PB3, off-time sense) */
-	ldi r16, BIT(REFS0) | BIT(ADLAR) | BIT(MUX1) | BIT(MUX0)
-	out _SFR_IO_ADDR(ADMUX), r16
-	/* Start a single conversion. Division factor of 32 between the system
-	 * clock and the ADC input clock for an ADC input frequency of 150kHz
-	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
-	 * datasheet. */
-	ldi r16, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	out _SFR_IO_ADDR(ADCSRA), r16
-
-	/* Load off-time voltage threshold setting from EEPROM */
-	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
+	/* Bypass off-time expiration check when the off-time is being measured
+	 * as part of the SF_STATE_OFF_TIME_SET special function. */
+	ldi r17, SF_STATE_ADDR
 	rcall eeprom_read
-	in r22, _SFR_IO_ADDR(EEDR)
+	in r18, _SFR_IO_ADDR(EEDR)
+	cpi r18, SF_STATE_OFF_TIME_SET_CURR
+	brne off_time_check
+	rjmp off_time_endif
 
-	/* Wait for ADC conversion to finish. It takes a total of 25 ADC clock
-	 * cycles here. */
-off_time_adc_wait:
-	sbic _SFR_IO_ADDR(ADCSRA), ADSC
-	rjmp off_time_adc_wait
-
-	in r21, _SFR_IO_ADDR(ADCH)
+off_time_check:
+	rcall vofft_read
 	/* Debugging: store ADC val in EEPROM debug byte. */
-	mov r18, r21
 	rcall debug_byte_eeprom
 
 	/* Charge up off-time sense capacitor for subsequent sensing. */
 	sbi _SFR_IO_ADDR(PORTB), PORTB3
 	sbi _SFR_IO_ADDR(DDRB), PB3
 
+	/* Load off-time voltage threshold setting from EEPROM */
+	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
+	rcall eeprom_read
+	in r22, _SFR_IO_ADDR(EEDR)
+
 	/* If Vsense >= Vthresh */
-	cp r21, r22
+	cp r18, r22
 	brsh off_time_endif
 
 	/* Reset mode */

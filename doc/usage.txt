@@ -22,10 +22,20 @@
    - Special function mode allows performing one of the following special
      functions:
      - Indicate battery voltage
-     - Read from EEPROM (not yet implemented)
-     - Write to EEPROM (not yet implemented)
+     - Read from EEPROM
+     - Write to EEPROM
+     - Set the off-time
      Some special functions that might be implemented in the future:
      - Set timer
      - Stopwatch
      - Set Morse code buffer
      - Output from Morse code buffer
+
+   - SF_STATE_OFF_TIME_SET
+     After activating this special function, turn off the light for the desired
+     new off-time then turn the light back on. Note that you may not want to use
+     this special function while currently in off-time mode because if something
+     goes wrong you may be unable to switch modes and thus unable to enter
+     special function mode again to adjust things. In that case you will have to
+     use the "unbrick" mode to reset things to a sane state. So it may be
+     preferable to switch to on-time control before using this function.
