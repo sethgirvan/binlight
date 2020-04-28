@@ -93,10 +93,17 @@
 #define CFG_OFF_TIME_VTHRESH_ADDR 0x09
 #define CFG_ON_TIME_ADDR 0x0A
 
-#define CFG_VBAT_LOW_ADDR 0x0B
+#define CFG_VBAT_LOW_LVLS_ADDR 0x18
+#define CFG_VBAT_LOW_LVLS_C 4
+
+#define CFG_BAT_LOW_BRIGHT_LVLS_ADDR 0x1C
+
+/* Some level of delay is needed because the light is briefly turned off while
+ * checking the battery voltage, so if it is done at too high of a rate it will
+ * perceptibly affect the brightness. */
+#define CFG_CHECK_VBAT_INTERVAL 100 /* units of 10 milliseconds */
+
 #define CFG_BAT_LOW_BLINK_INTERVAL_ADDR 0x0C
- /* Two consecutive blinks of the light indicate a low battery condition. */
-#define CFG_BAT_LOW_NBLINKS 2
 /* 1/2 period in units of 10 milliseconds of each of the blinks. */
 #define CFG_BAT_LOW_BLINK_PERIOD 10
 
@@ -105,6 +112,7 @@
 /* Bit field flags byte 0 */
 #define CFG_FLAGS0_ADDR 0x0E
 #define CFG_FLAGS0_ON_TIME 0 /* 1 IFF on-time control is configured. */
+#define CFG_FLAGS0_BAT_LOW_DIM 1 /* 1 to globally enable low bat dimming */
 
 #define CFG_QUICK_TO_NONQUICK_MODE_ADDR 0x0F
 #define CFG_SF_BRIGHT_SET_TIME_ADDR 0x10
@@ -229,16 +237,17 @@ return:
 /*******************************************************************************
  * Delay in units of approximately 10 seconds.
  *
- * Calls delay_10ms_tick for 2.5 seconds 4 times.
+ * Calls delay_10ms_tick for 2.5 seconds 4 times. Every 2.5 second iteration,
+ * pwm_set() is called to handle low battery detection dimming.
  *
  * Parameters:
  *   r19: Delay = approximately r19 * 10s. Not modified.
  * Registers:
- *   r16, r18, r21: temp
+ *   r14, r16, r18, r21: temp
  * Indirectly modified registers:
- *   r17, r24, r25
+ *   r17, r22, r24, r25, r30
  ******************************************************************************/
-delay_10s_tick:
+delay_10s_tick_pwm_set:
 	ldi r16, 250
 	mov r18, r19
 delay_10s_tick_loop:
@@ -248,6 +257,10 @@ delay_10s_tick_loop:
 	ldi r21, 3
 loop_10s:
 	rcall delay_10ms_tick
+
+	mov r14, r23
+	rcall pwm_set
+
 	subi r21, 1
 	brsh loop_10s
 
@@ -286,28 +299,28 @@ off_time_adc_wait:
  * Read the battery voltage from ADC1 (PB2).
  *
  * Returns:
- *   r18: battery voltage
+ *   r22: battery voltage
  ******************************************************************************/
 vbat_read:
 	/* - Use internal 1.1V bandgap reference
 	 * - Left adjust the ADC result, so ADCH can just be read to get the
 	 *   most significant 8 bits.
-	 * - Enable ADC1 (PB2, VBat sense pin) */
-	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
-	out _SFR_IO_ADDR(ADMUX), r18
+	 * - Enable ADC1 (PB2, Vbat sense pin) */
+	ldi r22, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r22
 
 	/* Potential optimization: replace next two instructions with:
 	 *   sbi ADCSRA ADSC
 	 * assuming ADCSRA has already been configured by the off-time sense
 	 * code. */
-	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	out _SFR_IO_ADDR(ADCSRA), r18
+	ldi r22, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	out _SFR_IO_ADDR(ADCSRA), r22
 
 vbat_read_adc_wait:
 	sbic _SFR_IO_ADDR(ADCSRA), ADSC
 	rjmp vbat_read_adc_wait
 
-	in r18, _SFR_IO_ADDR(ADCH)
+	in r22, _SFR_IO_ADDR(ADCH)
 	ret
 
 /*******************************************************************************
@@ -417,7 +430,9 @@ sf_state_commit:
  *        trailing 0s).
  *   r18: Data to output. The least significant bits are used.
  * Registers:
+ *   r14: Current duty cycle
  *   r16: 1/2 bit time period.
+ *   r17: temp
  *   r19: Duty cycle for first half of bit
  *   r21: Duty cycle for second half of bit
  *
@@ -449,10 +464,10 @@ indicate_0:
 	lsr r21
 	lsr r21
 indicate_endif:
-	mov r17, r19
+	mov r14, r19
 	rcall pwm_set
 	rcall delay_10ms_tick
-	mov r17, r21
+	mov r14, r21
 	rcall pwm_set
 	rcall delay_10ms_tick
 
@@ -461,7 +476,7 @@ indicate_endif:
 	rjmp indicate_bin_loop
 
 indicate_bin_restore:
-	mov r17, r23
+	mov r14, r23
 	rcall pwm_set
 	ret
 
@@ -487,7 +502,9 @@ indicate_bin_restore:
  *        significant to least significant bit.
  *
  * Registers:
+ *   r14: Current duty cycle
  *   r16: 1/2 input bit period
+ *   r17: temp
  *   r21: Number of bits read on so far
  *
  * Indirectly modified registers:
@@ -521,10 +538,10 @@ input_bin_loop:
 	rcall eeprom_write
 
 	/* Flash light to provide a clock indication to the user. */
-	clr r17
+	clr r14
 	rcall pwm_set
 	rcall delay_10ms_tick
-	mov r17, r23
+	mov r14, r23
 	rcall pwm_set
 	rcall delay_10ms_tick
 
@@ -635,20 +652,86 @@ mode_next_quick_commit:
 	ret
 
 /*******************************************************************************
- * Set the PWM duty cycle of the light.
+ * Returns:
+ *   r30: The current level index in CFG_VBAT_LOW_LVLS or 255 if Vbat is above
+ *        CFG_VBAT_LOW_LVLS[0]. Lower battery voltages correspond to higher
+ *        indices.
+ * Registers:
+ *   r17, r22: temp
+ ******************************************************************************/
+vbat_low_lvl:
+	rcall vbat_read /* Vbat in r22 */
+
+	/* Check CFG_VBAT_LOW_LVLS from lowest to highest. */
+	ldi r30, CFG_VBAT_LOW_LVLS_C
+vbat_low_lvls_loop:
+	subi r30, 1
+	brlo vbat_low_lvls_loop_end
+
+	mov r17, r30
+	subi r17, -CFG_VBAT_LOW_LVLS_ADDR
+	rcall eeprom_read
+	in r17, _SFR_IO_ADDR(EEDR)
+	cp r22, r17
+	brsh vbat_low_lvls_loop
+
+vbat_low_lvls_loop_end:
+	ret
+
+/*******************************************************************************
+ * Set the PWM duty cycle of the light. Configured low battery dimming is
+ * enforced.
  *
  * Parameters:
- *   r17: Duty cycle = r17 / 256
+ *   r14: Duty cycle = r14 / 256
  *        The max duty cycle is 255/256 ~= 99.6%. See the comment in
  *        timer_init() about this.
+ * Registers:
+ *   r17, r22: temp
+ * Returns:
+ *   r30: The current level index in CFG_VBAT_LOW_LVLS or 255 if Vbat is above
+ *        CFG_VBAT_LOW_LVLS[0]. See vbat_low_lvl().
  *
  * Because we are using set on compare match mode, lower values of OCR0B result
  * in higher duty cycles, so we need to use 255 minus the passed duty cycle
  * value.
+ *
+ * We briefly switch off the light while measuring the battery voltage so we
+ * can measure the "true" battery voltage with voltage drop due to internal
+ * resistance, etc minimized. And more importantly, we get a consistent measure
+ * of the battery voltage which is not changing as the PWM output changes state
+ * or based on the current duty cycle.
  ******************************************************************************/
 pwm_set:
-	com r17
-	out _SFR_IO_ADDR(OCR0B), r17
+	/* Check global low bat dimming enable flag */
+	ldi r17, CFG_FLAGS0_ADDR
+	rcall eeprom_read
+	sbis _SFR_IO_ADDR(EEDR), CFG_FLAGS0_BAT_LOW_DIM
+	rjmp vbat_low_endif
+
+	ldi r22, 0xFF
+	out _SFR_IO_ADDR(OCR0B), r22
+
+	rcall vbat_low_lvl
+	cpi r30, CFG_VBAT_LOW_LVLS_C
+	brsh vbat_low_endif
+
+	/* Index into CFG_BAT_LOW_BRIGHT_LVLS to determine the brightness
+	 * upper bound at this battery level. */
+	mov r17, r30
+	subi r17, -CFG_BAT_LOW_BRIGHT_LVLS_ADDR
+	rcall eeprom_read
+	in r22, _SFR_IO_ADDR(EEDR)
+
+	/* Set the MIN of the current duty cycle and the upper bound duty cycle.
+	 */
+	cp r14, r22
+	brlo vbat_low_endif
+	mov r14, r22
+
+vbat_low_endif:
+	com r14
+	out _SFR_IO_ADDR(OCR0B), r14
 	ret
 
 /*******************************************************************************
@@ -657,10 +740,13 @@ pwm_set:
  * Parameters:
  *   r23: Duty cycle (0-255)
  * Registers:
+ *   r14: Current duty cycle
  *   r17: temp
+ * Indirectly modified registers:
+ *   r22, r30: pwm_set()
  ******************************************************************************/
 timer_init:
-	mov r17, r23
+	mov r14, r23
 	rcall pwm_set
 	/* Set OC0B (PB1 on this chip) on compare match, Fast PWM mode (mode 3).
 	 *
@@ -714,52 +800,67 @@ mode_activate:
 	cpi r23, MODE_SF_VAL
 	breq sf_mode
 
+/*******************************************************************************
+ * Normal mode
+ ******************************************************************************/
 normal_mode:
 	rcall timer_init
 	rcall sf_reset_state
 	rcall set_next_mode
 
-	/* Loop checking for battery voltage dropping below CFG_VBAT_LOW. */
 	ldi r17, CFG_BAT_LOW_BLINK_INTERVAL_ADDR
 	rcall eeprom_read
-	in r19, _SFR_IO_ADDR(EEDR) /* r19 is arg to delay_10s_tick */
+	in r19, _SFR_IO_ADDR(EEDR) /* r19 the is arg to delay_10s_tick */
+
+	/* We periodically call pwm_set() because it handles output dimming when
+	 * it detects a low battery condition. It also returns the result of
+	 * vbat_low_lvl() in r30.
+	 *
+	 * Sleep between checks to reduce power usage? */
+check_vbat_loop:
+	mov r14, r23
+	rcall pwm_set
+	cpi r30, CFG_VBAT_LOW_LVLS_C
+	brsh check_vbat_low_endif
+
 	/* CFG_BAT_LOW_BLINK_INTERVAL = 0 disables low bat indication blinks */
 	cpi r19, 0
-	breq inf_loop
+	brne vbat_low_indicate
 
-	ldi r17, CFG_VBAT_LOW_ADDR
-	rcall eeprom_read
-	in r15, _SFR_IO_ADDR(EEDR)
-check_vbat_loop:
-	rcall vbat_read
-	cp r18, r15
-	brsh check_vbat_loop
+check_vbat_low_endif:
+	ldi r16, CFG_CHECK_VBAT_INTERVAL
+	rcall delay_10ms_tick
+	rjmp check_vbat_loop
 
 vbat_low_indicate:
+	/* Number of blinks corresponds to the CFG_VBAT_LOW_LVLS index + 1: more
+	 * blinks indicates a lower voltage. The single blink for level 0 can
+	 * be hard to notice because it just looks like slight delay of the
+	 * light turning on, but I have found it fine after getting used to it.
+	 */
 	ldi r16, CFG_BAT_LOW_BLINK_PERIOD /* arg to delay_10ms_tick */
-	ldi r21, CFG_BAT_LOW_NBLINKS
+	mov r31, r30
 vbat_low_blink_loop:
-	subi r21, 1
-	brlo vbat_low_blink_loop_done
+	clr r14
+	rcall pwm_set
+	rcall delay_10ms_tick
+	mov r14, r23
+	rcall pwm_set
+	rcall delay_10ms_tick
 
-	clr r17
-	rcall pwm_set
-	rcall delay_10ms_tick
-	mov r17, r23
-	rcall pwm_set
-	rcall delay_10ms_tick
-	rjmp vbat_low_blink_loop
+	subi r31, 1
+	brsh vbat_low_blink_loop
 
 vbat_low_blink_loop_done:
 	/* TODO Maybe sleep instead for the period to reduce power usage. */
-	rcall delay_10s_tick /* r19 contains CFG_BAT_LOW_BLINK_INTERVAL */
+	rcall delay_10s_tick_pwm_set
 	rjmp check_vbat_loop
 
-inf_loop:
-	rjmp inf_loop
 
-
-sf_mode: /* Special function mode. */
+/*******************************************************************************
+ * Special function mode
+ ******************************************************************************/
+sf_mode:
 	ldi r17, SF_BRIGHT_ADDR
 	rcall eeprom_read
 	in r23, _SFR_IO_ADDR(EEDR)
@@ -857,6 +958,7 @@ sf_state_vbat_indicate:
 	 */
 vbat_read_loop:
 	rcall vbat_read
+	mov r18, r22
 	ldi r29, 8
 	rcall indicate_bin
 
@@ -1024,6 +1126,7 @@ ctrl_on_time:
 	clr r18
 	rcall mode_commit
 
+inf_loop:
 	rjmp inf_loop
 
 /*******************************************************************************
