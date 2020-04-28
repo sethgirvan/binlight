@@ -12,8 +12,7 @@ CFLAGS ?= $(CPPFLAGS) -mmcu=$(MCU)
 
 LDFLAGS = -mmcu=$(MCU) -nostdlib
 
-OBJECTS ?= main.o
-
+PRGOBJ ?= main.o
 EEPOBJ ?= eeprom.o
 
 _TARGET = snth-10dd
@@ -28,7 +27,7 @@ all: $(TARGET) $(EEPROM_TARGET)
 $(TARGET): $(_TARGET).elf
 	$(OBJCOPY) -O ihex $< $@
 
-$(_TARGET).elf: $(OBJECTS)
+$(_TARGET).elf: $(PRGOBJ)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 .PHONY: eeprom
@@ -37,7 +36,7 @@ eeprom: $(EEPROM_TARGET)
 $(EEPROM_TARGET): $(EEPOBJ)
 	$(OBJCOPY) -j .eeprom --change-section-lma .eeprom=0 -O ihex $< $@
 
-$(OBJECTS) $(EEPOBJ): %.o: %.S
+$(PRGOBJ) $(EEPOBJ): %.o: %.S
 	$(CC) $(CFLAGS) -O0 -c -o $@ $<
 
 
