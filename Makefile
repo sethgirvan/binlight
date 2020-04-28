@@ -1,7 +1,7 @@
 CC := avr-gcc
 OBJCOPY := avr-objcopy
 
-MCU ?= attiny13
+MCU ?= attiny13a
 AVRDUDE_MCU ?= t13
 F_CPU ?= 4800000
 # Cheap SPI programmer. Override if using a different programmer.
