@@ -647,8 +647,9 @@ mode_next_quick_commit:
 	in r5, _SFR_IO_ADDR(EEDR)
 
 	/* Setup up CFG_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
-	 * which  SF_BRIGHT will be to the current PWM duty cycle value. If
-	 * CFG_SF_BRIGHT_SET_TIME is 0, this is disabled. */
+	 * the expiration of which  SF_BRIGHT will be set to the current PWM
+	 * duty cycle value. If CFG_SF_BRIGHT_SET_TIME is 0, this is disabled.
+	 */
 	ldi r17, CFG_SF_BRIGHT_SET_TIME_ADDR
 	rcall eeprom_read
 	in r4, _SFR_IO_ADDR(EEDR)
@@ -1114,25 +1115,14 @@ main:
  * On-time control
  ******************************************************************************/
 ctrl_on_time:
-	rcall mode_activate
-	mov r18, r20
-	inc r18
-	andi r18, MODE_MASK
-	rcall mode_commit
-
-	/* Read on-time setting into r16. */
+	/* Setup on-time watchdog interrupt countdown, after the expiration of
+	 * which the next mode will be reset to mode 0. The interrupt is enabled
+	 * in set_next_mode() which is called by mode_activate(). */
 	ldi r17, CFG_ON_TIME_ADDR
 	rcall eeprom_read
-	in r16, _SFR_IO_ADDR(EEDR)
-	/* Wait on-time interval before resetting mode. Delay time is in r16. */
-	rcall delay_10ms_tick
+	in r6, _SFR_IO_ADDR(EEDR)
 
-/* Reset mode */
-	clr r18
-	rcall mode_commit
-
-inf_loop:
-	rjmp inf_loop
+	rjmp mode_activate
 
 /*******************************************************************************
  * Off-time control
@@ -1155,8 +1145,7 @@ ctrl_off_time:
 	rcall eeprom_read
 	in r18, _SFR_IO_ADDR(EEDR)
 	cpi r18, SF_STATE_OFF_TIME_SET_CURR
-	brne off_time_check
-	rjmp off_time_endif
+	breq off_time_endif
 
 off_time_check:
 	rcall vofft_read
@@ -1180,7 +1169,7 @@ off_time_check:
 	clr r20
 
 off_time_endif:
-	rcall mode_activate
+	rjmp mode_activate
 
 /*
  * Watchdog timeout interrupt handler.
@@ -1213,6 +1202,17 @@ int_wd:
 	rcall set_next_mode_nonquick
 wd_quick_mode_expire_endif:
 wd_quick_mode_endif:
+
+	/* On-time */
+	cp r6, r0
+	breq wd_on_time_endif
+	dec r6
+	cp r6, r0
+	brne wd_on_time_expire_endif
+	clr r18
+	rcall mode_commit
+wd_on_time_expire_endif:
+wd_on_time_endif:
 
 	/* Special function mode brightness set on-time */
 	cp r4, r0

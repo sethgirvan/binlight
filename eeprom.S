@@ -35,14 +35,13 @@
  * to try a lower value capacitor. */
 .byte 0x66
 
-/* 0x12 CFG_ON_TIME: On-time setting in units of ~10 milliseconds
- * 50 -> 500ms */
-.byte 50
+/* 0x12 CFG_ON_TIME: On-time setting in units of ~16 milliseconds.
+ * 31 -> 496ms */
+.byte 31
 
-/* 0x13 CFG_NORMAL_MODES_C
- * Number of normal modes. eg the value 4 here would mean that after mode 3
- * switching modes cycles back to mode 0.
- * Max 8. ie range [1, 8]. */
+/* 0x13 CFG_NORMAL_MODES_C: Number of normal modes. eg the value 4 here would
+ * mean that after mode 3 switching modes cycles back to mode 0. Max 8. ie range
+ * [1, 8]. */
 .byte 4
 
 /* 0x14 CFG_BAT_LOW_BLINK_INTERVAL: Time between low battery indication blinks
