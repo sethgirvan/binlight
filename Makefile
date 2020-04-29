@@ -66,3 +66,5 @@ flash-fuse:
 
 .PHONY: clean
 clean:
+	rm -f $(TARGET) $(_TARGET).elf $(PRGOBJ)
+	rm -f $(EEPROM_TARGET) $(EEPOBJ)
