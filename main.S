@@ -74,13 +74,16 @@
 #define F_CPU 4800000
 #endif
 
-#define MODE_ADDR 0x08
-#define MODE_MASK 0x7 /* Bits 0-2 indicate current mode out of 8 (0-7). */
-/* Modes 0x4 - 0x7 (ie when bit 2 is set) are the "quick modes", selected and
+#define MODE_ADDR 0x10
+#define MODE_MASK 0xF /* Bits 0-3 indicate current mode out of 16 (0-15). */
+
+/* Modes 0x8 - 0xF (ie when bit 3 is set) are the "quick modes", selected and
  * cycled by switching the power on and off in quick succession (how quick is
  * defined by CFG_QUICK_TIME). */
-#define MODE_QUICK 2
-#define MODE_OVERFLOW 3 /* MODE bit 3 reserved for mode bits overflow. */
+#define MODE_QUICK 3
+
+#define CFG_NORMAL_MODES_C_ADDR 0x13
+
 /* Special reserved mode duty cycle value which is used for special function
  * mode. This means this duty cycle is not available for use. 0xFD is chosen
  * because the maximum brightness, 0xFF, will be essentially indistinguishable.
@@ -90,39 +93,39 @@
  * the maximum usable brightness. */
 #define MODE_SF_VAL 0xFD
 
-#define CFG_OFF_TIME_VTHRESH_ADDR 0x09
-#define CFG_ON_TIME_ADDR 0x0A
+#define CFG_OFF_TIME_VTHRESH_ADDR 0x11
+#define CFG_ON_TIME_ADDR 0x12
 
-#define CFG_VBAT_LOW_LVLS_ADDR 0x18
+#define CFG_VBAT_LOW_LVLS_ADDR 0x20
 #define CFG_VBAT_LOW_LVLS_C 4
 
-#define CFG_BAT_LOW_BRIGHT_LVLS_ADDR 0x1C
+#define CFG_BAT_LOW_BRIGHT_LVLS_ADDR 0x24
 
 /* Some level of delay is needed because the light is briefly turned off while
  * checking the battery voltage, so if it is done at too high of a rate it will
  * perceptibly affect the brightness. */
 #define CFG_CHECK_VBAT_INTERVAL 100 /* units of 10 milliseconds */
 
-#define CFG_BAT_LOW_BLINK_INTERVAL_ADDR 0x0C
+#define CFG_BAT_LOW_BLINK_INTERVAL_ADDR 0x14
 /* 1/2 period in units of 10 milliseconds of each of the blinks. */
 #define CFG_BAT_LOW_BLINK_PERIOD 10
 
-#define CFG_QUICK_TIME_ADDR 0x0D
+#define CFG_QUICK_TIME_ADDR 0x15
 
-/* Bit field flags byte 0 */
-#define CFG_FLAGS0_ADDR 0x0E
+/* Flags bit field byte 0 */
+#define CFG_FLAGS0_ADDR 0x16
 #define CFG_FLAGS0_ON_TIME 0 /* 1 IFF on-time control is configured. */
 #define CFG_FLAGS0_BAT_LOW_DIM 1 /* 1 to globally enable low bat dimming */
 
-#define CFG_QUICK_TO_NONQUICK_MODE_ADDR 0x0F
-#define CFG_SF_BRIGHT_SET_TIME_ADDR 0x10
-#define CFG_SF_INDICATE_PERIOD_ADDR 0x14
-#define CFG_SF_INPUT_PERIOD_ADDR 0x15
+#define CFG_QUICK_TO_NONQUICK_MODE_ADDR 0x17
+#define CFG_SF_BRIGHT_SET_TIME_ADDR 0x18
+#define CFG_SF_INDICATE_PERIOD_ADDR 0x1C
+#define CFG_SF_INPUT_PERIOD_ADDR 0x1D
 
-#define SF_BRIGHT_ADDR 0x11
+#define SF_BRIGHT_ADDR 0x19
 
-#define SF_STATE_ADDR 0x12
-#define SF_STATE_EEPROM_WRITE_LOC_ADDR 0x13
+#define SF_STATE_ADDR 0x1A
+#define SF_STATE_EEPROM_WRITE_LOC_ADDR 0x1B
 
 /* States enumeration. States 0x00 through 0x07 are reserved for special
  * functions that can be selected by the user. Auxiliary states that can only be
@@ -161,8 +164,8 @@
 #define SF_OFF_TIME_SET_WAIT_NBITS 8
 #define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
-#define INPUT_BIN_STATE_BITC_ADDR 0x16
-#define INPUT_BIN_STATE_BUF_ADDR 0x17
+#define INPUT_BIN_STATE_BITC_ADDR 0x1E
+#define INPUT_BIN_STATE_BUF_ADDR 0x1F
 
 #define DEBUG_BYTE_ADDR 0x3F
 
@@ -566,18 +569,24 @@ input_bin_done:
  *
  * Parameters:
  *   r20: Current mode. Not modified.
+ * Registers:
+ *   r17: temp
  * Return:
  *   r18: Next non-quick mode.
  ******************************************************************************/
 nonquick_next:
-	cpi r20, 0x03
-	brlo nonquick_inc
-	clr r18
-	ret
-
-nonquick_inc:
 	mov r18, r20
 	inc r18
+
+	ldi r17, CFG_NORMAL_MODES_C_ADDR
+	rcall eeprom_read
+	in r17, _SFR_IO_ADDR(EEDR)
+	cp r18, r17
+	brlo nonquick_next_ovflw_endif
+
+	clr r18
+
+nonquick_next_ovflw_endif:
 	ret
 
 /*******************************************************************************
@@ -618,19 +627,15 @@ set_next_mode:
 	rjmp set_next_curr_nonquick
 
 	/* Currently in quick mode, increment to next quick mode (wrapping). */
-	cpi r20, 0x07
-	brlo mode_quick_inc
-	ldi r18, 0x04
-	rjmp mode_quick_ovflw_endif
-mode_quick_inc:
 	mov r18, r20
 	inc r18
-mode_quick_ovflw_endif:
+	andi r18, MODE_MASK
+	ori r18, BIT(MODE_QUICK)
 	rjmp mode_next_quick_commit
 
 	/* Not in quick mode, set to first quick mode. */
 set_next_curr_nonquick:
-	ldi r18, 0x04
+	ldi r18, BIT(MODE_QUICK)
 
 mode_next_quick_commit:
 	rcall mode_commit
@@ -1112,7 +1117,7 @@ ctrl_on_time:
 	rcall mode_activate
 	mov r18, r20
 	inc r18
-	andi r18, ~BIT(MODE_OVERFLOW)
+	andi r18, MODE_MASK
 	rcall mode_commit
 
 	/* Read on-time setting into r16. */
@@ -1172,7 +1177,7 @@ off_time_check:
 	brsh off_time_endif
 
 	/* Reset mode */
-	andi r20, ~MODE_MASK
+	clr r20
 
 off_time_endif:
 	rcall mode_activate
