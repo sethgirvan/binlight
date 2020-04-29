@@ -15,7 +15,7 @@ LDFLAGS = -mmcu=$(MCU) -nostdlib
 PRGOBJ ?= main.o
 EEPOBJ ?= eeprom.o
 
-_TARGET = snth-10dd
+_TARGET = binlight
 TARGET ?= $(_TARGET).ihex
 
 _EEPROM_TARGET = eeprom

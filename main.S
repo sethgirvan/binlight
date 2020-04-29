@@ -1229,4 +1229,4 @@ wd_sf_bright_endif:
 
 .global verstr
 verstr:
-.asciz "snth-10dd v0.0.1"
+.asciz "binlight v0.0.1"
