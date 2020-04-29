@@ -24,7 +24,7 @@
  *
  * 0xFF seems to result in around 600ms with a 1uF off-time capacitor. May want
  * to try a lower value capacitor. */
-.byte 0xFF
+.byte 0x66
 
 /* 0x0A CFG_ON_TIME: On-time setting in units of ~10 milliseconds
  * 50 -> 500ms */
