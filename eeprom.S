@@ -31,8 +31,18 @@
  *   1.1V (internal ref) * CFG_OFF_TIME_VTHRESH / 255
  * on startup.
  *
- * 0xFF seems to result in around 600ms with a 1uF off-time capacitor. May want
- * to try a lower value capacitor. */
+ * 0x66 seems to result in around 600ms with a 1uF off-time capacitor in the
+ * circuit I am using.
+ *
+ * I have found that the other circuitry connected to the microcontroller can to
+ * significantly affect the discharging of the off-time capacitor. eg lower
+ * impedance between Vcc and GND seems to increase the discharge rate. This
+ * might be due to current being able to flow from the off-time capacitor to the
+ * Vcc rail through the internal protection diode in the MCU.
+ *
+ * You can have this value automatically set based on a measured off-time by
+ * using the off_time_set special function.
+ */
 .byte 0x66
 
 /* 0x12 CFG_ON_TIME: On-time setting in units of ~16 milliseconds.
