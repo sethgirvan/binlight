@@ -56,13 +56,14 @@
 
 #include <avr/io.h>
 
+#include "eeprom.h"
+
 #define BIT(n) (1 << (n))
 
 /* Note that some configuration values are stored in EEPROM to allow
  * modification by the user without a programmer by using the eeprom_write
- * special function. The EEPROM address for those configuration values will be
- * defined by a macro with suffix '_ADDR', and a description and the default
- * value can be looked up in eeprom.S.
+ * special function. The EEPROM addresses for those variables are defined in
+ * eeprom.h and the defaults are defined in either eep_core.S or eeprom.S.
  *
  * Some configuration values have not been deemed worth making changeable in
  * this way and thus require recompiling and reflashing to update.
@@ -74,15 +75,12 @@
 #define F_CPU 4800000
 #endif
 
-#define MODE_ADDR 0x10
 #define MODE_MASK 0xF /* Bits 0-3 indicate current mode out of 16 (0-15). */
 
 /* Modes 0x8 - 0xF (ie when bit 3 is set) are the "quick modes", selected and
  * cycled by switching the power on and off in quick succession (how quick is
- * defined by CFG_QUICK_TIME). */
+ * defined by EEP_QUICK_TIME). */
 #define MODE_QUICK 3
-
-#define CFG_NORMAL_MODES_C_ADDR 0x13
 
 /* Special reserved mode duty cycle value which is used for special function
  * mode. This means this duty cycle is not available for use. 0xFD is chosen
@@ -93,39 +91,13 @@
  * the maximum usable brightness. */
 #define MODE_SF_VAL 0xFD
 
-#define CFG_OFF_TIME_VTHRESH_ADDR 0x11
-#define CFG_ON_TIME_ADDR 0x12
-
-#define CFG_VBAT_LOW_LVLS_ADDR 0x20
-#define CFG_VBAT_LOW_LVLS_C 4
-
-#define CFG_BAT_LOW_BRIGHT_LVLS_ADDR 0x24
-
 /* Some level of delay is needed because the light is briefly turned off while
  * checking the battery voltage, so if it is done at too high of a rate it will
  * perceptibly affect the brightness. */
 #define CFG_CHECK_VBAT_INTERVAL 100 /* units of 10 milliseconds */
 
-#define CFG_BAT_LOW_BLINK_INTERVAL_ADDR 0x14
 /* 1/2 period in units of 10 milliseconds of each of the blinks. */
 #define CFG_BAT_LOW_BLINK_PERIOD 10
-
-#define CFG_QUICK_TIME_ADDR 0x15
-
-/* Flags bit field byte 0 */
-#define CFG_FLAGS0_ADDR 0x16
-#define CFG_FLAGS0_ON_TIME 0 /* 1 IFF on-time control is configured. */
-#define CFG_FLAGS0_BAT_LOW_DIM 1 /* 1 to globally enable low bat dimming */
-
-#define CFG_QUICK_TO_NONQUICK_MODE_ADDR 0x17
-#define CFG_SF_BRIGHT_SET_TIME_ADDR 0x18
-#define CFG_SF_INDICATE_PERIOD_ADDR 0x1C
-#define CFG_SF_INPUT_PERIOD_ADDR 0x1D
-
-#define SF_BRIGHT_ADDR 0x19
-
-#define SF_STATE_ADDR 0x1A
-#define SF_STATE_EEPROM_WRITE_LOC_ADDR 0x1B
 
 /* States enumeration. States 0x00 through 0x07 are reserved for special
  * functions that can be selected by the user. Auxiliary states that can only be
@@ -138,7 +110,7 @@
 #define SF_STATE_FSELECT 0x09 /* Read input to select function */
 #define SF_STATE_RETRY_SEL 0x0A
 #define SF_STATE_EEPROM_WRITE_VAL 0x0B
-/* Set CFG_OFF_TIME_VTHRESH to current off-time ADC value. */
+/* Set EEP_OFF_TIME_VTHRESH to current off-time ADC value. */
 #define SF_STATE_OFF_TIME_SET_CURR 0x0C
 
 /* Determines maximum number of user-selectable special functions. 3 bits allows
@@ -149,25 +121,26 @@
 /* Bit pattern output when entering special function mode: The 4 bits '0101'
  * (output from least to most significant bit, so output as 1 - 0 - 1 - 0). */
 #define SF_ENTERED_NBITS 4
-#define SF_ENTERED_PATTERN 0x05
+#define SF_ENTERED_PATTERN 0x5
 /* Bit pattern output to indicate that the special function selection will be
  * retried (output chronologically as 1 - 1 - 0 - 0). */
 #define SF_RETRY_SEL_NBITS 4
-#define SF_RETRY_SEL_PATTERN 0x03
+#define SF_RETRY_SEL_PATTERN 0x3
 /* Bit pattern output between battery voltage indications. */
 #define SF_VBAT_INDICATE_SYNC_NBITS 4
 #define SF_VBAT_INDICATE_SYNC_PATTERN 0x0E
 /* Bit pattern output to while waiting for the user to switch off the light in
  * order to set the off time. The number of bits, combined with
- * CFG_SF_INDICATE_PERIOD, determines how long we will wait before cancelling
+ * EEP_SF_INDICATE_PERIOD, determines how long we will wait before cancelling
  * the operation. */
 #define SF_OFF_TIME_SET_WAIT_NBITS 8
 #define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
-#define INPUT_BIN_STATE_BITC_ADDR 0x1E
-#define INPUT_BIN_STATE_BUF_ADDR 0x1F
-
-#define DEBUG_BYTE_ADDR 0x3F
+#define CFG_UNBRICK_ON_TIME 31 /* ~500ms. Units of ~16 milliseconds. */
+#define CFG_UNBRICK_PRESS_REQ 50
+#define CFG_UNBRICK_INDICATE_BRIGHT 0x40 /* Unbrick indication brightness */
+#define CFG_UNBRICK_INDICATE_NBITS 4
+#define CFG_UNBRICK_INDICATE_PATTERN 0xC
 
 .section .text
 
@@ -179,11 +152,15 @@
  *       Service Routine, so r2 is used to store it.
  *   r3: Non-ISR SREG storage.
  *   r4: Special function mode brightness set time remaining: on-time delay
- *       (CFG_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the current
+ *       (EEP_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the current
  *       mode brightness is set as the maximum brightness used for special
  *       function mode output.
- *   r5: Quick time remaining: on-time delay (CFG_QUICK_TIME) remaining (in
+ *   r5: Quick time remaining: on-time delay (EEP_QUICK_TIME) remaining (in
  *       16ms WD ticks) until the next mode is switched to a non-quick mode.
+ *   r6: On-time remaining (in 16ms WD ticks) until the next mode is reset to
+ *       mode 0. This will always be 0 when using off-time control.
+ *   r7: Unbrick function on-time delay (CFG_UNBRICK_ON_TIME) remaining until
+ *       the unbrick counter will be reset.
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
@@ -386,7 +363,7 @@ eeprom_write_wait:
  *   r17: temp
  ******************************************************************************/
 debug_byte_eeprom:
-	ldi r17, DEBUG_BYTE_ADDR
+	ldi r17, EEP_DEBUG_BYTE
 	rcall eeprom_write
 	ret
 
@@ -399,7 +376,7 @@ debug_byte_eeprom:
  *   r17: tmp
  ******************************************************************************/
 mode_commit:
-	ldi r17, MODE_ADDR
+	ldi r17, EEP_MODE
 	rcall eeprom_write
 	ret
 
@@ -412,7 +389,7 @@ mode_commit:
  *   r17: tmp
  ******************************************************************************/
 sf_state_commit:
-	ldi r17, SF_STATE_ADDR
+	ldi r17, EEP_SF_STATE
 	rcall eeprom_write
 	ret
 
@@ -443,7 +420,7 @@ sf_state_commit:
  *   r24, r25
  ******************************************************************************/
 indicate_bin:
-	ldi r17, CFG_SF_INDICATE_PERIOD_ADDR
+	ldi r17, EEP_SF_INDICATE_PERIOD
 	rcall eeprom_read
 	in r16, _SFR_IO_ADDR(EEDR)
 indicate_bin_loop:
@@ -514,15 +491,15 @@ indicate_bin_restore:
  *   r23, r24
  ******************************************************************************/
 input_bin:
-	ldi r17, CFG_SF_INPUT_PERIOD_ADDR
+	ldi r17, EEP_SF_INPUT_PERIOD
 	rcall eeprom_read
 	in r16, _SFR_IO_ADDR(EEDR)
 
-	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BUF
 	rcall eeprom_read
 	in r19, _SFR_IO_ADDR(EEDR)
 
-	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BITC
 	rcall eeprom_read
 	in r21, _SFR_IO_ADDR(EEDR)
 
@@ -532,11 +509,11 @@ input_bin_loop:
 
 	lsl r19
 	ori r19, 1
-	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BUF
 	mov r18, r19
 	rcall eeprom_write
 	inc r21
-	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BITC
 	mov r18, r21
 	rcall eeprom_write
 
@@ -557,10 +534,10 @@ input_bin_loop:
 
 input_bin_done:
 	/* Done reading bits, reset EEPROM state for future calls. */
-	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BITC
 	clr r18
 	rcall eeprom_write
-	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BUF
 	rcall eeprom_write
 	ret
 
@@ -578,7 +555,7 @@ nonquick_next:
 	mov r18, r20
 	inc r18
 
-	ldi r17, CFG_NORMAL_MODES_C_ADDR
+	ldi r17, EEP_NORMAL_MODES_C
 	rcall eeprom_read
 	in r17, _SFR_IO_ADDR(EEDR)
 	cp r18, r17
@@ -602,7 +579,7 @@ set_next_mode_nonquick:
 	sbrs r20, MODE_QUICK
 	rjmp set_next_nonquick_curr_nonquick
 
-	ldi r17, CFG_QUICK_TO_NONQUICK_MODE_ADDR
+	ldi r17, EEP_QUICK_TO_NONQUICK_MODE
 	rcall eeprom_read
 	in r18, _SFR_IO_ADDR(EEDR)
 	rjmp set_next_nonquick_curr_quick_endif
@@ -616,7 +593,7 @@ set_next_nonquick_curr_quick_endif:
 	ret
 
 /*******************************************************************************
- * Until the quick mode on-time delay (CFG_QUICK_TIME) expires, the next mode is
+ * Until the quick mode on-time delay (EEP_QUICK_TIME) expires, the next mode is
  * set to the next quick mode.
  *
  * Parameters:
@@ -642,15 +619,15 @@ mode_next_quick_commit:
 
 	/* Setup quick mode on-time watchdog interrupt countdown, after the
 	 * expiration of which the next mode is set to a nonquick mode. */
-	ldi r17, CFG_QUICK_TIME_ADDR
+	ldi r17, EEP_QUICK_TIME
 	rcall eeprom_read
 	in r5, _SFR_IO_ADDR(EEDR)
 
-	/* Setup up CFG_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
+	/* Setup EEP_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
 	 * the expiration of which  SF_BRIGHT will be set to the current PWM
-	 * duty cycle value. If CFG_SF_BRIGHT_SET_TIME is 0, this is disabled.
+	 * duty cycle value. If EEP_SF_BRIGHT_SET_TIME is 0, this is disabled.
 	 */
-	ldi r17, CFG_SF_BRIGHT_SET_TIME_ADDR
+	ldi r17, EEP_SF_BRIGHT_SET_TIME
 	rcall eeprom_read
 	in r4, _SFR_IO_ADDR(EEDR)
 
@@ -659,8 +636,8 @@ mode_next_quick_commit:
 
 /*******************************************************************************
  * Returns:
- *   r30: The current level index in CFG_VBAT_LOW_LVLS or 255 if Vbat is above
- *        CFG_VBAT_LOW_LVLS[0]. Lower battery voltages correspond to higher
+ *   r30: The current level index in EEP_VBAT_LOW_LVLS or 255 if Vbat is above
+ *        EEP_VBAT_LOW_LVLS[0]. Lower battery voltages correspond to higher
  *        indices.
  * Registers:
  *   r17, r22: temp
@@ -668,14 +645,14 @@ mode_next_quick_commit:
 vbat_low_lvl:
 	rcall vbat_read /* Vbat in r22 */
 
-	/* Check CFG_VBAT_LOW_LVLS from lowest to highest. */
-	ldi r30, CFG_VBAT_LOW_LVLS_C
+	/* Check EEP_VBAT_LOW_LVLS from lowest to highest. */
+	ldi r30, EEP_VBAT_LOW_LVLS_C
 vbat_low_lvls_loop:
 	subi r30, 1
 	brlo vbat_low_lvls_loop_end
 
 	mov r17, r30
-	subi r17, -CFG_VBAT_LOW_LVLS_ADDR
+	subi r17, -EEP_VBAT_LOW_LVLS
 	rcall eeprom_read
 	in r17, _SFR_IO_ADDR(EEDR)
 	cp r22, r17
@@ -695,8 +672,8 @@ vbat_low_lvls_loop_end:
  * Registers:
  *   r17, r22: temp
  * Returns:
- *   r30: The current level index in CFG_VBAT_LOW_LVLS or 255 if Vbat is above
- *        CFG_VBAT_LOW_LVLS[0]. See vbat_low_lvl().
+ *   r30: The current level index in EEP_VBAT_LOW_LVLS or 255 if Vbat is above
+ *        EEP_VBAT_LOW_LVLS[0]. See vbat_low_lvl().
  *
  * Because we are using set on compare match mode, lower values of OCR0B result
  * in higher duty cycles, so we need to use 255 minus the passed duty cycle
@@ -710,22 +687,22 @@ vbat_low_lvls_loop_end:
  ******************************************************************************/
 pwm_set:
 	/* Check global low bat dimming enable flag */
-	ldi r17, CFG_FLAGS0_ADDR
+	ldi r17, EEP_FLAGS0
 	rcall eeprom_read
-	sbis _SFR_IO_ADDR(EEDR), CFG_FLAGS0_BAT_LOW_DIM
+	sbis _SFR_IO_ADDR(EEDR), EEP_FLAGS0_BAT_LOW_DIM
 	rjmp vbat_low_endif
 
 	ldi r22, 0xFF
 	out _SFR_IO_ADDR(OCR0B), r22
 
 	rcall vbat_low_lvl
-	cpi r30, CFG_VBAT_LOW_LVLS_C
+	cpi r30, EEP_VBAT_LOW_LVLS_C
 	brsh vbat_low_endif
 
-	/* Index into CFG_BAT_LOW_BRIGHT_LVLS to determine the brightness
+	/* Index into EEP_BAT_LOW_BRIGHT_LVLS to determine the brightness
 	 * upper bound at this battery level. */
 	mov r17, r30
-	subi r17, -CFG_BAT_LOW_BRIGHT_LVLS_ADDR
+	subi r17, -EEP_BAT_LOW_BRIGHT_LVLS
 	rcall eeprom_read
 	in r22, _SFR_IO_ADDR(EEDR)
 
@@ -785,21 +762,23 @@ sf_reset_state:
 	ldi r18, SF_STATE_INIT
 	rcall sf_state_commit
 	clr r18
-	ldi r17, INPUT_BIN_STATE_BITC_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BITC
 	rcall eeprom_write
-	ldi r17, INPUT_BIN_STATE_BUF_ADDR
+	ldi r17, EEP_INPUT_BIN_STATE_BUF
 	rcall eeprom_write
 	ret
 
 /*******************************************************************************
  * Activate the currently configured mode.
  *
+ * The PWM duty cycles associated which each mode are stored at the beginning
+ * of EEPROM, so they are directly indexed by the mode number.
+ *
  * Parameters:
  *   r20: MODE byte value
  ******************************************************************************/
 mode_activate:
 	mov r17, r20
-	andi r17, MODE_MASK
 	rcall eeprom_read
 	in r23, _SFR_IO_ADDR(EEDR)
 
@@ -814,7 +793,7 @@ normal_mode:
 	rcall sf_reset_state
 	rcall set_next_mode
 
-	ldi r17, CFG_BAT_LOW_BLINK_INTERVAL_ADDR
+	ldi r17, EEP_BAT_LOW_BLINK_INTERVAL
 	rcall eeprom_read
 	in r19, _SFR_IO_ADDR(EEDR) /* r19 the is arg to delay_10s_tick */
 
@@ -826,10 +805,10 @@ normal_mode:
 check_vbat_loop:
 	mov r14, r23
 	rcall pwm_set
-	cpi r30, CFG_VBAT_LOW_LVLS_C
+	cpi r30, EEP_VBAT_LOW_LVLS_C
 	brsh check_vbat_low_endif
 
-	/* CFG_BAT_LOW_BLINK_INTERVAL = 0 disables low bat indication blinks */
+	/* EEP_BAT_LOW_BLINK_INTERVAL = 0 disables low bat indication blinks */
 	cpi r19, 0
 	brne vbat_low_indicate
 
@@ -839,7 +818,7 @@ check_vbat_low_endif:
 	rjmp check_vbat_loop
 
 vbat_low_indicate:
-	/* Number of blinks corresponds to the CFG_VBAT_LOW_LVLS index + 1: more
+	/* Number of blinks corresponds to the EEP_VBAT_LOW_LVLS index + 1: more
 	 * blinks indicates a lower voltage. The single blink for level 0 can
 	 * be hard to notice because it just looks like slight delay of the
 	 * light turning on, but I have found it fine after getting used to it.
@@ -867,17 +846,17 @@ vbat_low_blink_loop_done:
  * Special function mode
  ******************************************************************************/
 sf_mode:
-	ldi r17, SF_BRIGHT_ADDR
+	ldi r17, EEP_SF_BRIGHT
 	rcall eeprom_read
 	in r23, _SFR_IO_ADDR(EEDR)
 	rcall timer_init
 
-	ldi r17, SF_STATE_ADDR
+	ldi r17, EEP_SF_STATE
 	rcall eeprom_read
 	in r18, _SFR_IO_ADDR(EEDR)
 
 sf_switch:
-	/* r30, r31 make up the Z register referenced by ijmp */
+	/* r30:r31 make up the Z register used by ijmp */
 	ldi r30, pm_lo8(sf_jmp_tbl)
 	ldi r31, pm_hi8(sf_jmp_tbl)
 	add r30, r18
@@ -1011,7 +990,7 @@ sf_state_eeprom_write:
 	/* select address */
 	ldi r29, 6
 	rcall input_bin
-	ldi r17, SF_STATE_EEPROM_WRITE_LOC_ADDR
+	ldi r17, EEP_SF_STATE_EEPROM_WRITE_LOC
 	mov r18, r19
 	rcall eeprom_write
 
@@ -1024,7 +1003,7 @@ sf_state_eeprom_write_val:
 	rcall input_bin
 
 	/* write byte */
-	ldi r17, SF_STATE_EEPROM_WRITE_LOC_ADDR
+	ldi r17, EEP_SF_STATE_EEPROM_WRITE_LOC
 	rcall eeprom_read
 	in r17, _SFR_IO_ADDR(EEDR)
 	mov r18, r19
@@ -1036,7 +1015,7 @@ sf_state_eeprom_write_val:
 	rjmp sf_state_retry_sel
 
 /* If the light is switched off while SF_OFF_TIME_SET_WAIT_PATTERN is being
- * output, set CFG_OFF_TIME_VTHRESH to the current value of the off-time ADC
+ * output, set EEP_OFF_TIME_VTHRESH to the current value of the off-time ADC
  * upon turning back on.
  *
  * Note that ctrl_off_time includes special code to bypass the off-time
@@ -1059,7 +1038,7 @@ sf_state_off_time_set:
 
 sf_state_off_time_set_curr:
 	rcall vofft_read
-	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
+	ldi r17, EEP_OFF_TIME_VTHRESH
 	rcall eeprom_write
 
 	/* Query for the user to select another special function. */
@@ -1099,16 +1078,67 @@ main:
 	ldi r16, BIT(WDTIE)
 	out _SFR_IO_ADDR(WDTCR), r16
 
+
+	/* Handle unbrick function checking */
+
+	ldi r17, EEP_UNBRICK_PRESS_CNT
+	rcall eeprom_read
+	in r18, _SFR_IO_ADDR(EEDR)
+
+	cpi r18, CFG_UNBRICK_PRESS_REQ
+	brlo unbrick_endif
+
+	clr r18
+
+	/* Restore the core EEPROM configuration located in the first
+	 * EEP_CORE_LEN bytes of EEPROM. The default values used are stored in
+	 * program memory at eep_core. */
+	/* r30:r31 make up the Z register used by lpm */
+	ldi r30, lo8(eep_core)
+	ldi r31, hi8(eep_core)
+	clr r17
+unbrick_eep_restore_loop:
+	cpi r17, EEP_CORE_LEN
+	brsh unbrick_eep_restore_loop_end
+
+	lpm r18, Z+ /* Z reg is post-incremented */
+	rcall eeprom_write
+
+	inc r17
+	rjmp unbrick_eep_restore_loop
+
+unbrick_eep_restore_loop_end:
+
+	/* Indicate unbrick function was performed */
+	ldi r23, CFG_UNBRICK_INDICATE_BRIGHT
+	rcall timer_init
+	ldi r29, CFG_UNBRICK_INDICATE_NBITS
+	ldi r18, CFG_UNBRICK_INDICATE_PATTERN
+	rcall indicate_bin
+
+	ldi r17, EEP_UNBRICK_PRESS_CNT
+
+unbrick_endif:
+	inc r18
+	rcall eeprom_write
+
+	/* Setup unbrick on-time watchdog interrupt countdown, after the
+	 * expiration of which the unbrick counter will be reset to 0. */
+	ldi r17, CFG_UNBRICK_ON_TIME
+	rcall eeprom_read
+	in r7, _SFR_IO_ADDR(EEDR)
+
+
 	/* Read mode */
-	ldi r17, MODE_ADDR
+	ldi r17, EEP_MODE
 	rcall eeprom_read
 	in r20, _SFR_IO_ADDR(EEDR)
 
 	/* Check whether set to on-time or off-time mode */
-	ldi r17, CFG_FLAGS0_ADDR
+	ldi r17, EEP_FLAGS0
 	rcall eeprom_read
 	in r19, _SFR_IO_ADDR(EEDR)
-	sbrs r19, CFG_FLAGS0_ON_TIME
+	sbrs r19, EEP_FLAGS0_ON_TIME
 	rjmp ctrl_off_time
 
 /*******************************************************************************
@@ -1118,7 +1148,7 @@ ctrl_on_time:
 	/* Setup on-time watchdog interrupt countdown, after the expiration of
 	 * which the next mode will be reset to mode 0. The interrupt is enabled
 	 * in set_next_mode() which is called by mode_activate(). */
-	ldi r17, CFG_ON_TIME_ADDR
+	ldi r17, EEP_ON_TIME
 	rcall eeprom_read
 	in r6, _SFR_IO_ADDR(EEDR)
 
@@ -1141,7 +1171,7 @@ ctrl_on_time:
 ctrl_off_time:
 	/* Bypass off-time expiration check when the off-time is being measured
 	 * as part of the SF_STATE_OFF_TIME_SET special function. */
-	ldi r17, SF_STATE_ADDR
+	ldi r17, EEP_SF_STATE
 	rcall eeprom_read
 	in r18, _SFR_IO_ADDR(EEDR)
 	cpi r18, SF_STATE_OFF_TIME_SET_CURR
@@ -1157,7 +1187,7 @@ off_time_check:
 	sbi _SFR_IO_ADDR(DDRB), PB3
 
 	/* Load off-time voltage threshold setting from EEPROM */
-	ldi r17, CFG_OFF_TIME_VTHRESH_ADDR
+	ldi r17, EEP_OFF_TIME_VTHRESH
 	rcall eeprom_read
 	in r22, _SFR_IO_ADDR(EEDR)
 
@@ -1220,11 +1250,23 @@ wd_on_time_endif:
 	dec r4
 	cp r4, r0
 	brne wd_sf_bright_expire_endif
-	ldi r17, SF_BRIGHT_ADDR
+	ldi r17, EEP_SF_BRIGHT
 	mov r18, r23
 	rcall eeprom_write
 wd_sf_bright_expire_endif:
 wd_sf_bright_endif:
+
+	/* Unbrick on-time */
+	cp r7, r0
+	breq wd_unbrick_endif
+	dec r7
+	cp r7, r0
+	brne wd_unbrick_expire_endif
+	ldi r17, EEP_UNBRICK_PRESS_CNT
+	clr r18
+	rcall eeprom_write
+wd_unbrick_expire_endif:
+wd_unbrick_endif:
 
 	pop r18
 	pop r17
@@ -1232,6 +1274,10 @@ wd_sf_bright_endif:
 	out _SFR_IO_ADDR(SREG), r2
 	reti
 
-.global verstr
-verstr:
-.asciz "binlight v0.0.1"
+.global eep_core
+eep_core:
+.include "eep_core.S"
+
+.global firmname
+firmname:
+.asciz "binlight"

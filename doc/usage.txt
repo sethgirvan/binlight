@@ -1,9 +1,9 @@
 Quick Modes
 -----------
 Quick modes are entered by cycling power to the driver multiple times in quick
-succession: ie with on time less than the CFG_QUICK_TIME configuration and off
+succession: ie with on time less than the EEP_QUICK_TIME configuration and off
 time less than the normal off time (which depends on the off time capacitance
-used and the value of CFG_OFF_TIME_V_THRESH).
+used and the value of EEP_OFF_TIME_V_THRESH).
 
 For example, from any mode the first quick mode can be entered by quickly
 turning the light off and on in a sequence of off-on-off-on (or starting with
@@ -39,25 +39,43 @@ Special function mode
    this special function while currently in off-time mode because if something
    goes wrong you may be unable to switch modes and thus unable to enter special
    function mode again to adjust things. In that case you will have to use the
-   "unbrick" mode to reset things to a sane state. So it may be preferable to
-   switch to on-time control before using this function.
+   "unbrick function" to reset things to a sane state. So it may be preferable
+   to switch to on-time control before using this function.
 
 Low battery indication blinks
 -----------------------------
 binlight can output a number of blinks on power-on and repeated periodically
 to indicate a low battery condition. The frequency at which these low battery
-indication blinks are repeated is set by CFG_BAT_LOW_BLINK_INTERVAL and the
-voltages that the blinks occur at are set by CFG_VBAT_LOW_LVLS. Each
-progressively lower level of CFG_VBAT_LOW_LVLS corresponds with the number of
-blinks. ie between CFG_VBAT_LOW_LVLS[0] and CFG_VBAT_LOW_LVLS[1] the light
-will blink just once, between CFG_VBAT_LOW_LVLS[1] and CFG_VBAT_LOW_LVLS[2]
+indication blinks are repeated is set by EEP_BAT_LOW_BLINK_INTERVAL and the
+voltages that the blinks occur at are set by EEP_VBAT_LOW_LVLS. Each
+progressively lower level of EEP_VBAT_LOW_LVLS corresponds with the number of
+blinks. ie between EEP_VBAT_LOW_LVLS[0] and EEP_VBAT_LOW_LVLS[1] the light
+will blink just once, between EEP_VBAT_LOW_LVLS[1] and EEP_VBAT_LOW_LVLS[2]
 the light will blink twice, etc.
 
 Low battery dimming
 -------------------
 binlight can limit the maximum brightness during a low battery condition. The
-maximum duty cycles are defined CFG_BAT_LOW_BRIGHT_LVLS which are activated
-at the corresponding battery voltages defined by CFG_VBAT_LOW_LVLS. Bit 1
-of CFG_FLAGS0 provides a global enable switch for low battery dimming, so
+maximum duty cycles are defined EEP_BAT_LOW_BRIGHT_LVLS which are activated
+at the corresponding battery voltages defined by EEP_VBAT_LOW_LVLS. Bit 1
+of EEP_FLAGS0 provides a global enable switch for low battery dimming, so
 one can relatively quickly override low battery dimming on the fly by writing
 this bit to 0 with eeprom_write.
+
+Unbrick function
+----------------
+
+It is possible to mess up the configuration in EEPROM to such a degree that the
+light becomes unusable and/or one cannot get back into special function mode to
+change the configuration.
+
+The "unbrick" function resets some core configuration in EEPROM to ensure that
+the light is usable enough to be able to enter special function mode again to
+then adjust the configuration as desired. Thus saving your flashlight from being
+a useless brick until/unless you can connect an external programmer to fixup the
+EEPROM data.
+
+To activate the unbrick function, turn the light on and off 50
+(CFG_UNBRICK_PRESS_REQ) times within .5 seconds of on-time each time
+(CFG_UNBRICK_ON_TIME). The unbrick function is based on on-time only because
+there is more that can go wrong with off-time measurement.
