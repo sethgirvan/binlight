@@ -19,9 +19,13 @@ Features
    - read data at any location in EEPROM
    - write data to any EEPROM location
    - measure and set new off-time
+
    By changing the bytes in EEPROM with the eeprom_write special function,
    almost all configuration values, including mode settings, can be changed on
    the fly without reprogramming.
+
+   The binary-based input/output interface is arguable a bit ridiculous, but
+   it may amuse one's inner hacker.
 
 binlight was initially written for the ATtiny13A-based Mountain
 Electronics MTN-10DD driver board. This 10mm diameter board uses an ATtiny13A
@@ -92,10 +96,10 @@ functions.
 Configuration
 -------------
 
-See `eeprom.S` for the configuration values that are stored in EEPROM. These
-values are possible to change at run-time by using the eeprom_write special
-function. You can also just change `eeprom.S` and flash your changes by running
-`make flash-eeprom`.
+See `eep_core.S` and `eeprom.S` for the configuration values that are stored in
+EEPROM. These values are possible to change at run-time by using the
+eeprom_write special function. You can also just change `eep_core.S` or
+`eeprom.S` and flash your changes by running `make flash-eeprom`.
 
 Some configuration values were considered not worth making reconfigurable in
 EEPROM or do not make sense to make reconfigurable in EEPROM (eg pin
