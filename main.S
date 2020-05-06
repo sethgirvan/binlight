@@ -49,9 +49,8 @@
  * to a Vin of ~5.5702V.
  *
  * PB3 (ADC3) connects to the off-time sense capacitor. On the MTN-10DD driver,
- * this is a 10µF capacitor, but I find this gives too large of a minimum
- * off-time, so I am using a 1µF capacitor I am finding to result in a minimum
- * off-time of ~600ms.
+ * this is a 10µF capacitor, but I find this may result in too large of a
+ * minimum off-time, so I am using a 1µF capacitor.
  */
 
 #include <avr/io.h>
