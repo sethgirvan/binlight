@@ -34,7 +34,7 @@
  * datasheet: http://ww1.microchip.com/downloads/en/DeviceDoc/doc8126.pdf
  *
  * PB1 (OC0B) is connected to the MOSFET gate and thus controls the LED on the
- * MTN-10DD driver board.
+ * MTN-10DD driver board I am using.
  *
  * PB2 (ADC1) is connected through a resistor divider to the battery (Vin). On
  * the MTN-10DD this resistor divider looks like:
