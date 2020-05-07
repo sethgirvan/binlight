@@ -75,7 +75,7 @@
  *        purpose of this flag when one can just set all EEP_BAT_LOW_BRIGHT_LVLS
  *        to 0xFF to get the same effect is to allow easier enabling and
  *        disabling using the eeprom_write special function. */
-.byte 0x02
+.byte 0x03
 
 /* 0x17 EEP_QUICK_TO_NONQUICK_MODE: Which non-quick mode to enter when exiting
  * quick mode.*/
