@@ -1275,7 +1275,7 @@ wd_unbrick_endif:
 
 .global eep_core
 eep_core:
-.include "eep_core.S"
+#include "eep_core.S"
 
 .global firmname
 firmname:

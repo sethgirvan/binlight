@@ -8,12 +8,15 @@ F_CPU ?= 4800000
 PROGRAMMER ?= usbasp
 
 CPPFLAGS ?= -DF_CPU=$(F_CPU)
-CFLAGS ?= $(CPPFLAGS) -mmcu=$(MCU)
+CFLAGS ?= $(CPPFLAGS) -MMD -MP -O0 -mmcu=$(MCU)
 
 LDFLAGS = -mmcu=$(MCU) -nostdlib
 
 PRGOBJ ?= main.o
 EEPOBJ ?= eeprom.o
+
+OBJECTS ?= $(PRGOBJ) $(EEPOBJ)
+dep_files := $(addsuffix .d, $(basename $(OBJECTS)))
 
 _TARGET = binlight
 TARGET ?= $(_TARGET).ihex
@@ -36,8 +39,8 @@ eeprom: $(EEPROM_TARGET)
 $(EEPROM_TARGET): $(EEPOBJ)
 	$(OBJCOPY) -j .eeprom --change-section-lma .eeprom=0 -O ihex $< $@
 
-$(PRGOBJ) $(EEPOBJ): %.o: %.S
-	$(CC) $(CFLAGS) -O0 -c -o $@ $<
+$(OBJECTS): %.o: %.S
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 
 .PHONY: flash-all
@@ -66,5 +69,9 @@ flash-fuse:
 
 .PHONY: clean
 clean:
-	rm -f $(TARGET) $(_TARGET).elf $(PRGOBJ)
-	rm -f $(EEPROM_TARGET) $(EEPOBJ)
+	rm -f $(TARGET) $(_TARGET).elf
+	rm -f $(EEPROM_TARGET)
+	rm -f $(OBJECTS)
+	rm -f $(dep_files)
+
+-include $(dep_files)
