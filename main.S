@@ -1057,6 +1057,8 @@ sf_state_off_time_set_curr:
 main:
 	/* Setup registers */
 	clr r0
+	clr r6 /* Disable on-time watchdog interrupt countdown. */
+
 
 	/* Setup output pins */
 	ldi r16, BIT(PB1)
