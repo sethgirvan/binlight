@@ -9,7 +9,7 @@
 
 .section .eeprom,"ax",@progbits
 
-.include "eep_core.S"
+#include "eep_core.S"
 
 /* 0x25 EEP_INPUT_BIN_STATE_BITC: Count of bits read in so far by the
  * input_bin() function. */
