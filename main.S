@@ -1138,8 +1138,7 @@ unbrick_endif:
 	/* Check whether set to on-time or off-time mode */
 	ldi r17, EEP_FLAGS0
 	rcall eeprom_read
-	in r19, _SFR_IO_ADDR(EEDR)
-	sbrs r19, EEP_FLAGS0_ON_TIME
+	sbis _SFR_IO_ADDR(EEDR), EEP_FLAGS0_ON_TIME
 	rjmp ctrl_off_time
 
 /*******************************************************************************
