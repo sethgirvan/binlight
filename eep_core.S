@@ -47,8 +47,8 @@
 .byte 0x66
 
 /* 0x12 EEP_ON_TIME: On-time setting in units of ~16 milliseconds.
- * 31 -> 496ms */
-.byte 31
+ * 62 -> 992ms */
+.byte 62
 
 /* 0x13 EEP_NORMAL_MODES_C: Number of normal modes. eg the value 4 here would
  * mean that after mode 3 switching modes cycles back to mode 0. Max 8. ie range
