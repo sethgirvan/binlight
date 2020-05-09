@@ -60,7 +60,7 @@
  */
 .byte 6
 
-/* 0x15 EEP_QUICK_TIME: On-time to select the next quick mode in units of ~10
+/* 0x15 EEP_QUICK_TIME: On-time to select the next quick mode in units of ~16
  * milliseconds: how quickly the switch needs to be double-tapped (In on-off-on
  * sequence. Can be a bit awkward on reverse-clicky flashlights.) to switch to
  * the next quick mode. */
@@ -81,7 +81,7 @@
  * quick mode.*/
 .byte 0
 
-/* 0x18 EEP_SF_BRIGHT_SET_TIME: On-time delay (in units of ~10 ms) until
+/* 0x18 EEP_SF_BRIGHT_SET_TIME: On-time delay (in units of ~16 ms) until
  * EEP_SF_BRIGHT is set to the current brightness. Set to 0 to disable in which
  * case the value of EEP_SF_BRIGHT is fixed. */
 .byte 250
