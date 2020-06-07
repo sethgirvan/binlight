@@ -46,3 +46,5 @@ Maybe
    input to allow switching past them.
  - Move more stuff out of eep_core.S to cut down on program memory usage for the
    unbrick function.
+ - Moonlight mode(s) even dimmer than the min 1/256 duty cycle. Maybe by
+   toggling the output from the watchdog interrupt.
