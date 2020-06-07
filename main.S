@@ -134,8 +134,8 @@
 #define SF_OFF_TIME_SET_WAIT_NBITS 8
 #define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
-#define CFG_UNBRICK_ON_TIME 31 /* ~500ms. Units of ~16 milliseconds. */
-#define CFG_UNBRICK_PRESS_REQ 50
+#define CFG_UNBRICK_ON_TIME 19 /* ~300ms. Units of ~16 milliseconds. */
+#define CFG_UNBRICK_PRESS_REQ 100
 #define CFG_UNBRICK_INDICATE_BRIGHT 0x40 /* Unbrick indication brightness */
 #define CFG_UNBRICK_INDICATE_NBITS 4
 #define CFG_UNBRICK_INDICATE_PATTERN 0xC
