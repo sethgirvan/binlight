@@ -1,5 +1,6 @@
 Quick Modes
 -----------
+
 Quick modes are entered by cycling power to the driver multiple times in quick
 succession: ie with on time less than the EEP_QUICK_TIME configuration and off
 time less than the normal off time (which depends on the off time capacitance
@@ -21,6 +22,7 @@ switching to a less bright mode.
 
 Special function mode
 ---------------------
+
  - Special function mode allows performing one of the following special
    functions:
    - 0 (0 - 0 - 0): vbat_indicate: Indicate battery voltage
@@ -44,6 +46,7 @@ Special function mode
 
 Low battery indication blinks
 -----------------------------
+
 binlight can output a number of blinks on power-on and repeated periodically
 to indicate a low battery condition. The frequency at which these low battery
 indication blinks are repeated is set by EEP_BAT_LOW_BLINK_INTERVAL and the
@@ -55,6 +58,7 @@ the light will blink twice, etc.
 
 Low battery dimming
 -------------------
+
 binlight can limit the maximum brightness during a low battery condition. The
 maximum duty cycles are defined EEP_BAT_LOW_BRIGHT_LVLS which are activated
 at the corresponding battery voltages defined by EEP_VBAT_LOW_LVLS. Bit 1
