@@ -5,6 +5,7 @@ TODO
    light when reading the battery voltage, probably the droop in the decoupling
    capacitors' voltage causes the sensed voltage to vary based on the brightness
    that has been active.
+ - Switch indicate_bin to most significant bit first.
 
 Add if possible
 ---------------
