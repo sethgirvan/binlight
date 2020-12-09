@@ -87,7 +87,9 @@
 .byte 250
 
 /* 0x19 EEP_SF_BRIGHT: Maximum PWM duty cycle used for indication during special
- * function mode. */
+ * function mode. This should be set to a value >= 3 because indicate_bin()
+ * requires 4 distinct brightness levels to indicate the data and clock. If this
+ * value is less than 3 some or all clock output will be floored to 0. */
 .byte 0x1F
 
 /* 0x1A EEP_SF_INDICATE_PERIOD: 1/2 the duration per bit (clock period) of

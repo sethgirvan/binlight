@@ -427,18 +427,26 @@ indicate_bin_loop:
 	sbrs r18, 0
 	rjmp indicate_0
 indicate_1:
-	/* 50% (rounding down) */
+	/* ~50% */
 	mov r19, r23
 	lsr r19
+	/* If r23 (current mode brightness) is 0x11, we want the brightness to
+	 * become 0x10 here since 0x01 would be used for the clock high signal
+	 * of indicate_0. */
+	inc r19
 	/* 100% */
 	mov r21, r23
 	rjmp indicate_endif
 indicate_0:
 	/* 0% */
 	clr r19
-	/* 12.5% (rounding down) */
+	/* ~12.5% */
 	mov r21, r23
 	lsr r21
+	/* Need to pad the value a bit so that when the lowest allowable
+	 * EEP_SF_BRIGHT value (0x03) is used, it becomes 0x01 here instead of
+	 * getting truncated to 0. */
+	subi r21, -4
 	lsr r21
 	lsr r21
 indicate_endif:
@@ -1251,6 +1259,15 @@ wd_on_time_endif:
 	brne wd_sf_bright_expire_endif
 	ldi r17, EEP_SF_BRIGHT
 	mov r18, r23
+
+	/* Do not allow setting EEP_SF_BRIGHT to a duty cycle less than 3
+	 * because indicate_bin() requires 4 distinct brightness levels. See the
+	 * note for EEP_SF_BRIGHT in eep_core.S. */
+	cpi r18, 0x03
+	brsh wd_sf_bright_min_endif
+	ldi r18, 0x03
+wd_sf_bright_min_endif:
+
 	rcall eeprom_write
 wd_sf_bright_expire_endif:
 wd_sf_bright_endif:

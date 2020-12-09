@@ -16,9 +16,6 @@ Add if possible
    low battery brightness upper bound is less than 50% of the requested
    SF_BRIGHT duty cycle, because both the 100% and 50% levels will be truncated
    to the upper bound.
- - Set a floor of 3 for EEP_SF_BRIGHT to avoid having the clock signal pulses
-   truncated to 0 in indicate_bin(), since indicate_bin() requires four separate
-   brightness levels.
  - Make pin connections configurable with macros.
 
 Maybe
