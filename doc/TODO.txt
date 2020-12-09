@@ -60,3 +60,4 @@ Maybe
    unbrick function.
  - Moonlight mode(s) even dimmer than the min 1/256 duty cycle. Maybe by
    toggling the output from the watchdog interrupt.
+ - Time-based "thermal" throttling.
