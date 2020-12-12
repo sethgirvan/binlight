@@ -79,7 +79,11 @@ then adjust the configuration as desired. Thus saving your flashlight from being
 a useless brick until/unless you can connect an external programmer to fixup the
 EEPROM data.
 
-To activate the unbrick function, turn the light on and off 50
-(CFG_UNBRICK_PRESS_REQ) times within .5 seconds of on-time each time
-(CFG_UNBRICK_ON_TIME). The unbrick function is based on on-time only because
-there is more that can go wrong with off-time measurement.
+To activate the unbrick function, turn the light on alternately for less than
+.5 (CFG_UNBRICK_ON_TIME_0) seconds followed by between .5 and 2
+(CFG_UNBRICK_ON_TIME_1) seconds a total of 64 (CFG_UNBRICK_PRESS_REQ) times (ie
+turn the light on for less than .5 seconds then off then on between .5 and 2
+seconds then off, repeated 32 times). The unbrick function is based on on-time
+only because there is more that can go wrong with off-time measurement (and one
+can use this firmware in solely on-time mode with a driver that does not have an
+off-time measurement capacitor).

@@ -134,8 +134,12 @@
 #define SF_OFF_TIME_SET_WAIT_NBITS 8
 #define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
-#define CFG_UNBRICK_ON_TIME 19 /* ~300ms. Units of ~16 milliseconds. */
-#define CFG_UNBRICK_PRESS_REQ 100
+/* We actually use the delta CFG_UNBRICK_ON_TIME_1 - CFG_UNBRICK_ON_TIME_0
+ * instead of CFG_UNBRICK_ON_TIME_1 directly, so CFG_UNBRICK_ON_TIME_1 may have
+ * a value up to 255 + CFG_UNBRICK_ON_TIME_0. */
+#define CFG_UNBRICK_ON_TIME_0 31 /* ~500ms. Units of ~16 milliseconds. */
+#define CFG_UNBRICK_ON_TIME_1 125 /* 2000ms. Units of ~16 milliseconds. */
+#define CFG_UNBRICK_PRESS_REQ 64
 #define CFG_UNBRICK_INDICATE_BRIGHT 0x40 /* Unbrick indication brightness */
 #define CFG_UNBRICK_INDICATE_NBITS 4
 #define CFG_UNBRICK_INDICATE_PATTERN 0xC
@@ -157,13 +161,16 @@
  *       16ms WD ticks) until the next mode is switched to a non-quick mode.
  *   r6: On-time remaining (in 16ms WD ticks) until the next mode is reset to
  *       mode 0. This will always be 0 when using off-time control.
- *   r7: Unbrick function on-time delay (CFG_UNBRICK_ON_TIME) remaining until
- *       the unbrick counter will be reset.
+ *   r7: Unbrick function on-time delay remaining until the unbrick counter will
+ *       be incremented.
+ *   r8: r7 + r8 = unbrick function on-time delay remaining until the unbrick
+ *       counter will be reset.
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
  *        the output is being strobed or it is being modified for special
  *        function mode output indication.
+ *   r26: Current unbrick press count (EEP_UNBRICK_PRESS_CNT).
  */
 
 /*******************************************************************************
@@ -1087,16 +1094,17 @@ main:
 	out _SFR_IO_ADDR(WDTCR), r16
 
 
-	/* Handle unbrick function checking */
+	/* Handle unbrick function checking
+	 * r26: Current unbrick press count */
 
 	ldi r17, EEP_UNBRICK_PRESS_CNT
 	rcall eeprom_read
-	in r18, _SFR_IO_ADDR(EEDR)
+	in r26, _SFR_IO_ADDR(EEDR)
 
-	cpi r18, CFG_UNBRICK_PRESS_REQ
+	cpi r26, CFG_UNBRICK_PRESS_REQ
 	brlo unbrick_endif
 
-	clr r18
+	clr r26 /* Unbrick mode activated: reset press count */
 
 	/* Restore the core EEPROM configuration located in the first
 	 * EEP_CORE_LEN bytes of EEPROM. The default values used are stored in
@@ -1127,15 +1135,28 @@ unbrick_eep_restore_loop_end:
 	ldi r17, EEP_UNBRICK_PRESS_CNT
 
 unbrick_endif:
-	inc r18
-	rcall eeprom_write
-
-	/* Setup unbrick on-time watchdog interrupt countdown, after the
-	 * expiration of which the unbrick counter will be reset to 0. */
-	ldi r17, CFG_UNBRICK_ON_TIME
-	rcall eeprom_read
-	in r7, _SFR_IO_ADDR(EEDR)
-
+	/* Activating unbrick mode requires alternating on-times of less than
+	 * CFG_UNBRICK_ON_TIME_0 followed by between CFG_UNBRICK_ON_TIME_0 and
+	 * CFG_UNBRICK_ON_TIME_1, so there is different handling for when the
+	 * current press count is odd vs even. */
+	sbrc r26, 0
+	rjmp unbrick_count_odd
+unbrick_count_even:
+	/* Rather than incrementing and writing r26 to EEPROM here, we save 2
+	 * instruction by setting r7 to 1 (instead of 0) and letting the
+	 * watchdog interrupt unbrick code do that job the first time it runs.
+	 */
+	ldi r18, 1
+	mov r7, r18
+	ldi r18, CFG_UNBRICK_ON_TIME_0
+	mov r8, r18
+	rjmp unbrick_count_endif
+unbrick_count_odd:
+	ldi r18, CFG_UNBRICK_ON_TIME_0
+	mov r7, r18
+	ldi r18, CFG_UNBRICK_ON_TIME_1 - CFG_UNBRICK_ON_TIME_0
+	mov r8, r18
+unbrick_count_endif:
 
 	/* Read mode */
 	ldi r17, EEP_MODE
@@ -1272,16 +1293,29 @@ wd_sf_bright_min_endif:
 wd_sf_bright_expire_endif:
 wd_sf_bright_endif:
 
-	/* Unbrick on-time */
+	/* Unbrick on-time
+	 * r7 is the on-time remaining until we increment the unbrick press
+	 * count. r7 + r8 is the on-time remaining until the unbrick press count
+	 * expires and is reset back to 0 (we do not start decrementing r8 until
+	 * r7 is 0. */
 	cp r7, r0
-	breq wd_unbrick_endif
+	breq wd_unbrick_inc_endif
 	dec r7
 	cp r7, r0
-	brne wd_unbrick_expire_endif
+	brne wd_unbrick_endif
+	inc r26
+	rjmp wd_unbrick_count_commit
+wd_unbrick_inc_endif:
+	cp r8, r0
+	breq wd_unbrick_endif
+	dec r8
+	cp r8, r0
+	brne wd_unbrick_endif
+	clr r26
+wd_unbrick_count_commit:
 	ldi r17, EEP_UNBRICK_PRESS_CNT
-	clr r18
+	mov r18, r26
 	rcall eeprom_write
-wd_unbrick_expire_endif:
 wd_unbrick_endif:
 
 	pop r18
