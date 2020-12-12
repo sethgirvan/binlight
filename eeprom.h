@@ -1,7 +1,7 @@
 /*
  * EEPROM addresses of variables stored in EEPROM.
  *
- * See eep_core.S
+ * See eep_core.S and eeprom.S
  */
 
 #ifndef EEPROM_H
