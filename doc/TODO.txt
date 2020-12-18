@@ -53,3 +53,6 @@ Maybe
  - Moonlight mode(s) even dimmer than the min 1/256 duty cycle. Maybe by
    toggling the output from the watchdog interrupt.
  - Time-based "thermal" throttling.
+ - Store approximate time left to next low indication battery blinks in EEPROM
+   in order to approximately maintain the period between low battery indication
+   blinks even when cycling the power (for less than the off-time).
