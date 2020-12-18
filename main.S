@@ -439,8 +439,8 @@ indicate_1:
 	/* ~50% */
 	mov r10, r23
 	lsr r10
-	/* If r23 (current mode brightness) is 0x11, we want the brightness to
-	 * become 0x10 here since 0x01 would be used for the clock high signal
+	/* If r23 (current mode brightness) is 0x03, we want the brightness to
+	 * become 0x02 here since 0x01 would be used for the clock high signal
 	 * of indicate_0. */
 	inc r10
 	/* 100% */
