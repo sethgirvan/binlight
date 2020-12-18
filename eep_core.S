@@ -123,6 +123,9 @@
  *   ADC value = 255 * (Vbat - Vf) * R2 / (1.1V * (R1 + R2))
  *
  * The following values are for R1=19.9k, R2=4.7k with no diode.
+ *
+ * All values must be <= to 255 minus EEP_BAT_LOW_HYST, otherwise the level
+ * checking in vbat_low_lvl() will be messed up.
  */
 .byte 137 /* ~3.0V */
 .byte 128 /* ~2.8V */
@@ -143,6 +146,19 @@
 .byte 0x40
 .byte 0x10
 
-/* 0x24 EEP_VER: Firmware version. Including this in EEPROM allows reading it
+/* 0x24 EEP_BAT_LOW_HYST: Hysteresis applied for the current vbat_low_lvl to
+ * move back to a lower level (ie representing a higher battery voltage).
+ *
+ * The purpose of this is to prevent the brightness from oscillating between
+ * EEP_BAT_LOW_BRIGHT_LVLS as the sensed battery voltage rebounds due to
+ * decreased current draw or minor amounts of self-recharging, while still
+ * detecting when the battery has been recharged.
+ *
+ * This value must be <= to 255 minus the greatest EEP_VBAT_LOW_LVLS value,
+ * otherwise the level checking in vbat_low_lvl() will be messed up.
+ */
+.byte 17 /* ~200mV of hysteresis */
+
+/* 0x25 EEP_VER: Firmware version. Including this in EEPROM allows reading it
  * out at runtime with eeprom_read. */
 .byte 1

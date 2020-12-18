@@ -31,20 +31,22 @@
 #define EEP_VBAT_LOW_LVLS 0x1C
 #define EEP_VBAT_LOW_LVLS_C 4
 #define EEP_BAT_LOW_BRIGHT_LVLS 0x20
-#define EEP_VER 0x24
+#define EEP_BAT_LOW_HYST 0x24
+#define EEP_VER 0x25
 
 /* A copy of the first EEP_CORE_LEN bytes of the default values is also stored
  * in program memory to allow restoring those values with the unbrick function.
  */
-#define EEP_CORE_LEN 0x25
+#define EEP_CORE_LEN 0x26
 
 /* Default values for the following variables are defined in eeprom.S. */
 
-#define EEP_INPUT_BIN_STATE_BITC 0x25
-#define EEP_INPUT_BIN_STATE_BUF 0x26
-#define EEP_SF_STATE 0x27
-#define EEP_SF_STATE_EEPROM_WRITE_LOC 0x28
-#define EEP_UNBRICK_PRESS_CNT 0x29
+#define EEP_INPUT_BIN_STATE_BITC 0x26
+#define EEP_INPUT_BIN_STATE_BUF 0x27
+#define EEP_SF_STATE 0x28
+#define EEP_SF_STATE_EEPROM_WRITE_LOC 0x29
+#define EEP_UNBRICK_PRESS_CNT 0x30
+#define EEP_BAT_LOW_DIM_LVL 0x31
 
 #define EEP_DEBUG_BYTE 0x3F
 

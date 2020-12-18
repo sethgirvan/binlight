@@ -149,6 +149,7 @@
 /*
  * Register map:
  *   r0: Always 0.
+ *   r1: EEP_BAT_LOW_HYST
  *   r2: ISR SREG storage. The value of the Status Register is not automatically
  *       stored and restored when entering and returning from an Interrupt
  *       Service Routine, so r2 is used to store it.
@@ -165,6 +166,7 @@
  *       be incremented.
  *   r8: r7 + r8 = unbrick function on-time delay remaining until the unbrick
  *       counter will be reset.
+ *   r9: EEP_BAT_LOW_DIM_LVL
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
@@ -403,7 +405,7 @@ sf_state_commit:
  *
  * 0s are represented as a transition from 0% to 12.5% of SF_BRIGHT and 1s as a
  * transition from 50% to 100% of SF_BRIGHT. For example for the sequence of
- * 3 bits '011' (r17 = 3, r18 = 0x6):
+ * 3 bits '011' (r17 = 3, r19 = 0x6):
  * | bit 0  |   bit 1    |  bit 2   |
  * 0% - 12.5% - 50% - 100% - 50% - 100%
  *
@@ -413,40 +415,40 @@ sf_state_commit:
  * Parameters:
  *   r29: Number of bits to indicate (anything past 8 will just be padded with
  *        trailing 0s).
- *   r18: Data to output. The least significant bits are used.
+ *   r19: Data to output. The least significant bits are used.
  * Registers:
+ *   r10: Duty cycle for first half of bit
  *   r14: Current duty cycle
  *   r16: 1/2 bit time period.
  *   r17: temp
- *   r19: Duty cycle for first half of bit
  *   r21: Duty cycle for second half of bit
  *
  * Indirectly modified registers:
- *   r24, r25
+ *   r18, r24, r25
  ******************************************************************************/
 indicate_bin:
 	ldi r17, EEP_SF_INDICATE_PERIOD
 	rcall eeprom_read
 	in r16, _SFR_IO_ADDR(EEDR)
 indicate_bin_loop:
-	cpi r29, 0
-	breq indicate_bin_restore
-	sbrs r18, 0
+	subi r29, 1
+	brlo indicate_bin_restore
+	sbrs r19, 0
 	rjmp indicate_0
 indicate_1:
 	/* ~50% */
-	mov r19, r23
-	lsr r19
+	mov r10, r23
+	lsr r10
 	/* If r23 (current mode brightness) is 0x11, we want the brightness to
 	 * become 0x10 here since 0x01 would be used for the clock high signal
 	 * of indicate_0. */
-	inc r19
+	inc r10
 	/* 100% */
 	mov r21, r23
 	rjmp indicate_endif
 indicate_0:
 	/* 0% */
-	clr r19
+	clr r10
 	/* ~12.5% */
 	mov r21, r23
 	lsr r21
@@ -457,15 +459,14 @@ indicate_0:
 	lsr r21
 	lsr r21
 indicate_endif:
-	mov r14, r19
+	mov r14, r10
 	rcall pwm_set
 	rcall delay_10ms_tick
 	mov r14, r21
 	rcall pwm_set
 	rcall delay_10ms_tick
 
-	dec r29
-	lsr r18
+	lsr r19
 	rjmp indicate_bin_loop
 
 indicate_bin_restore:
@@ -501,7 +502,7 @@ indicate_bin_restore:
  *   r21: Number of bits read on so far
  *
  * Indirectly modified registers:
- *   r23, r24
+ *   r18, r23, r24
  ******************************************************************************/
 input_bin:
 	ldi r17, EEP_SF_INPUT_PERIOD
@@ -653,7 +654,7 @@ mode_next_quick_commit:
  *        EEP_VBAT_LOW_LVLS[0]. Lower battery voltages correspond to higher
  *        indices.
  * Registers:
- *   r17, r22: temp
+ *   r17, r18, r22: temp
  ******************************************************************************/
 vbat_low_lvl:
 	rcall vbat_read /* Vbat in r22 */
@@ -668,10 +669,33 @@ vbat_low_lvls_loop:
 	subi r17, -EEP_VBAT_LOW_LVLS
 	rcall eeprom_read
 	in r17, _SFR_IO_ADDR(EEDR)
+
+	/* Hysteresis is applied to increase the threshold required when going
+	 * from a higher (lower voltage) to a lower (higher voltage) vbat level.
+	 * r9 contains the current low battery dimming level.
+	 * We use brlt for a signed comparison because r9 can be -1 which means
+	 * no vbat_low_lvl is active. */
+	cp r9, r30
+	brlt vbat_low_lvls_nohyst
+	/* NOTE: We do not check for overflow (to save instructions). It is up
+	 * to the user to ensure all EEP_VBAT_LOW_LVLS are
+	 * <= 255 - EEP_BAT_LOW_HYST. */
+	add r17, r1 /* r1 holds EEP_BAT_LOW_HYST */
+vbat_low_lvls_nohyst:
 	cp r22, r17
 	brsh vbat_low_lvls_loop
 
 vbat_low_lvls_loop_end:
+	/* If r9 has changed, update EEP_BAT_LOW_DIM_LVL with its new value. We
+	 * spend the extra instructions to check this instead of writing the
+	 * value indiscriminately in order to minimize EEPROM wear. */
+	cp r30, r9
+	breq vbat_low_lvls_update_dim_lvl_endif
+	mov r9, r30
+	mov r18, r9
+	ldi r17, EEP_BAT_LOW_DIM_LVL
+	rcall eeprom_write
+vbat_low_lvls_update_dim_lvl_endif:
 	ret
 
 /*******************************************************************************
@@ -684,9 +708,13 @@ vbat_low_lvls_loop_end:
  *        timer_init() about this.
  * Registers:
  *   r17, r22: temp
+ *
  * Returns:
  *   r30: The current level index in EEP_VBAT_LOW_LVLS or 255 if Vbat is above
  *        EEP_VBAT_LOW_LVLS[0]. See vbat_low_lvl().
+ *
+ * Indirectly modified registers:
+ *   r18
  *
  * Because we are using set on compare match mode, lower values of OCR0B result
  * in higher duty cycles, so we need to use 255 minus the passed duty cycle
@@ -903,7 +931,7 @@ sf_state_retry_sel:
 	rcall set_next_mode_nonquick
 
 	ldi r29, SF_RETRY_SEL_NBITS
-	ldi r18, SF_RETRY_SEL_PATTERN
+	ldi r19, SF_RETRY_SEL_PATTERN
 	rcall indicate_bin
 
 	ldi r18, SF_STATE_FSELECT
@@ -918,7 +946,7 @@ sf_state_init:
 	 * function in this case. */
 	rcall set_next_mode
 	ldi r29, SF_ENTERED_NBITS
-	ldi r18, SF_ENTERED_PATTERN
+	ldi r19, SF_ENTERED_PATTERN
 	rcall indicate_bin
 
 	ldi r18, SF_STATE_FSELECT
@@ -956,7 +984,7 @@ sf_state_vbat_indicate:
 	 */
 vbat_read_loop:
 	rcall vbat_read
-	mov r18, r22
+	mov r19, r22
 	ldi r29, 8
 	rcall indicate_bin
 
@@ -967,7 +995,7 @@ vbat_read_loop:
 	 * indication instead such as completely turning off the light for a
 	 * period. */
 	ldi r29, SF_VBAT_INDICATE_SYNC_NBITS
-	ldi r18, SF_VBAT_INDICATE_SYNC_PATTERN
+	ldi r19, SF_VBAT_INDICATE_SYNC_PATTERN
 	rcall indicate_bin
 
 	rjmp vbat_read_loop
@@ -991,7 +1019,7 @@ sf_state_eeprom_read:
 loop_sf_eeprom_read:
 	mov r17, r28
 	rcall eeprom_read
-	in r18, _SFR_IO_ADDR(EEDR)
+	in r19, _SFR_IO_ADDR(EEDR)
 	ldi r29, 8
 	rcall indicate_bin
 	inc r28
@@ -1041,7 +1069,7 @@ sf_state_off_time_set:
 	ldi r18, SF_STATE_OFF_TIME_SET_CURR
 	rcall sf_state_commit
 	ldi r29, SF_OFF_TIME_SET_WAIT_NBITS
-	ldi r18, SF_OFF_TIME_SET_WAIT_PATTERN
+	ldi r19, SF_OFF_TIME_SET_WAIT_PATTERN
 	rcall indicate_bin
 	/* User never turned off the light: cancel operation. Query for another
 	 * special function. */
@@ -1093,6 +1121,15 @@ main:
 	ldi r16, BIT(WDTIE)
 	out _SFR_IO_ADDR(WDTCR), r16
 
+	/* Setup r1 with EEP_BAT_LOW_HYST */
+	ldi r17, EEP_BAT_LOW_HYST
+	rcall eeprom_read
+	in r1, _SFR_IO_ADDR(EEDR)
+
+	/* Setup r9 with the persisted vbat_low_lvl */
+	ldi r17, EEP_BAT_LOW_DIM_LVL
+	rcall eeprom_read
+	in r9, _SFR_IO_ADDR(EEDR)
 
 	/* Handle unbrick function checking
 	 * r26: Current unbrick press count */
@@ -1129,7 +1166,7 @@ unbrick_eep_restore_loop_end:
 	ldi r23, CFG_UNBRICK_INDICATE_BRIGHT
 	rcall timer_init
 	ldi r29, CFG_UNBRICK_INDICATE_NBITS
-	ldi r18, CFG_UNBRICK_INDICATE_PATTERN
+	ldi r19, CFG_UNBRICK_INDICATE_PATTERN
 	rcall indicate_bin
 
 	ldi r17, EEP_UNBRICK_PRESS_CNT

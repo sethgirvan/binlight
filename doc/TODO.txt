@@ -1,10 +1,5 @@
 TODO
 ----
- - I find the current low battery brightness limiting scheme causes brightness
-   oscillation with the flashlight I am using. Even though we always turn of the
-   light when reading the battery voltage, probably the droop in the decoupling
-   capacitors' voltage causes the sensed voltage to vary based on the brightness
-   that has been active.
  - Switch indicate_bin to most significant bit first.
 
 Add if possible
