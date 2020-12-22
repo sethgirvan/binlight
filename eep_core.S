@@ -4,6 +4,9 @@
  * EEPROM when the unbrick function is used.
  *
  * If you change the offset of a variable, make sure to update eeprom.h.
+ *
+ * UNUSED locations are just locations that were being used to for some feature
+ * or something that no longer exists. They can be reused for new features.
  */
 
 /* 0x00-0x07 EEP_NORMAL_MODES
@@ -81,16 +84,14 @@
  * quick mode.*/
 .byte 0
 
-/* 0x18 EEP_SF_BRIGHT_SET_TIME: On-time delay (in units of ~16 ms) until
- * EEP_SF_BRIGHT is set to the current brightness. Set to 0 to disable in which
- * case the value of EEP_SF_BRIGHT is fixed. */
-.byte 250
+/* 0x18 UNUSED */
+.byte 0
 
 /* 0x19 EEP_SF_BRIGHT: Maximum PWM duty cycle used for indication during special
  * function mode. This should be set to a value >= 3 because indicate_bin()
  * requires 4 distinct brightness levels to indicate the data and clock. If this
  * value is less than 3 some or all clock output will be floored to 0. */
-.byte 0x1F
+.byte 0x08
 
 /* 0x1A EEP_SF_INDICATE_PERIOD: 1/2 the duration per bit (clock period) of
  * special function mode output (in units of ~10 ms). */

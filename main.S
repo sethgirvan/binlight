@@ -166,10 +166,6 @@
  *       stored and restored when entering and returning from an Interrupt
  *       Service Routine, so r2 is used to store it.
  *   r3: Non-ISR SREG storage.
- *   r4: Special function mode brightness set time remaining: on-time delay
- *       (EEP_SF_BRIGHT_SET_TIME) remaining (in 16ms WD ticks) until the current
- *       mode brightness is set as the maximum brightness used for special
- *       function mode output.
  *   r5: Quick time remaining: on-time delay (EEP_QUICK_TIME) remaining (in
  *       16ms WD ticks) until the next mode is switched to a non-quick mode.
  *   r6: On-time remaining (in 16ms WD ticks) until the next mode is reset to
@@ -652,14 +648,6 @@ mode_next_quick_commit:
 	rcall eeprom_read
 	in r5, _SFR_IO_ADDR(EEDR)
 
-	/* Setup EEP_SF_BRIGHT_SET_TIME on-time watchdog countdown, after
-	 * the expiration of which  SF_BRIGHT will be set to the current PWM
-	 * duty cycle value. If EEP_SF_BRIGHT_SET_TIME is 0, this is disabled.
-	 */
-	ldi r17, EEP_SF_BRIGHT_SET_TIME
-	rcall eeprom_read
-	in r4, _SFR_IO_ADDR(EEDR)
-
 	sei
 	ret
 
@@ -800,7 +788,7 @@ temp_read:
 	brlo therm_undim_endif
 	/* The temperature has dropped below our threshold including hysteresis.
 	 * Increase the maximum allowed brightness. */
-	lsr r27
+	lsr  r27
 	brcc therm_undim_ovflw_endif /* Handle overflow to saturate at 0xFF */
 	ldi r27, 0xFF
 therm_undim_ovflw_endif:
@@ -821,13 +809,14 @@ therm_undim_endif:
 therm_dim_min_endif:
 	lsr r27
 	andi r27, 1
-
 therm_dim_endif:
+
 	/* Enforce thermal maximum duty cycle limit in r27 */
 	cp r27, r14
 	brsh therm_limit_endif
 	mov r14, r27
 therm_limit_endif:
+
 	com r14
 	out _SFR_IO_ADDR(OCR0B), r14
 	ret
@@ -1016,8 +1005,6 @@ sf_state_retry_sel:
 
 /* Output pattern pattern indicating special function mode has been entered. */
 sf_state_init:
-	/* XXX May be undesirable to include the set SF_BRIGHT part of this
-	 * function in this case. */
 	rcall set_next_mode
 	ldi r29, SF_ENTERED_NBITS
 	ldi r19, SF_ENTERED_PATTERN
@@ -1027,7 +1014,6 @@ sf_state_init:
 	rcall sf_state_commit
 
 	/* Disable asynchronous on-time-based mode-setting from WD interrupt. */
-	clr r4
 	clr r5
 	/* During the SF entered pattern, SF mode can be exit by switching
 	 * modes, but now input will be entered by tapping the power switch, so
@@ -1175,7 +1161,6 @@ main:
 	clr r0
 	clr r6 /* Disable on-time watchdog interrupt countdown. */
 	ldi r27, 0xFF /* No thermal dimming initially */
-
 
 	/* Setup output pins */
 	ldi r16, BIT(PB1)
@@ -1356,7 +1341,6 @@ off_time_endif:
  *
  * Registers:
  *   r2: SREG storage
- *   r4: Special function mode brightness set on-time delay remaining.
  *   r5: Quick time remaining.
  *   r20: Next nonquick mode
  *   r3 r17, r18: temp; original values restored before returning. (r3 is used
@@ -1386,26 +1370,6 @@ wd_quick_mode_endif:
 	rcall mode_commit
 wd_on_time_expire_endif:
 wd_on_time_endif:
-
-	/* Special function mode brightness set on-time */
-	cp r4, r0
-	breq wd_sf_bright_endif
-	dec r4
-	brne wd_sf_bright_expire_endif
-	ldi r17, EEP_SF_BRIGHT
-	mov r18, r23
-
-	/* Do not allow setting EEP_SF_BRIGHT to a duty cycle less than 3
-	 * because indicate_bin() requires 4 distinct brightness levels. See the
-	 * note for EEP_SF_BRIGHT in eep_core.S. */
-	cpi r18, 0x03
-	brsh wd_sf_bright_min_endif
-	ldi r18, 0x03
-wd_sf_bright_min_endif:
-
-	rcall eeprom_write
-wd_sf_bright_expire_endif:
-wd_sf_bright_endif:
 
 	/* Unbrick on-time
 	 * r7 is the on-time remaining until we increment the unbrick press

@@ -24,7 +24,6 @@
 #define EEP_FLAGS0_BAT_LOW_DIM 1 /* Enables low bat dimming. */
 
 #define EEP_QUICK_TO_NONQUICK_MODE 0x17
-#define EEP_SF_BRIGHT_SET_TIME 0x18
 #define EEP_SF_BRIGHT 0x19
 #define EEP_SF_INDICATE_PERIOD 0x1A
 #define EEP_SF_INPUT_PERIOD 0x1B
