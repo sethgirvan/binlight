@@ -736,12 +736,6 @@ vbat_low_lvls_update_dim_lvl_endif:
  * in higher duty cycles, so we need to use 255 minus the passed duty cycle
  * value.
  *
- * We briefly switch off the light while measuring the battery voltage so we
- * can measure the "true" battery voltage with voltage drop due to internal
- * resistance, etc minimized. And more importantly, we get a consistent measure
- * of the battery voltage which is not changing as the PWM output changes state
- * or based on the current duty cycle.
- *
  * The brightness may be halved or doubled (up to duty cycle passed in r14)
  * each time this function is called based on the measured temperature and the
  * thermal throttling limits. It is expected to call this function approximately
@@ -754,9 +748,6 @@ pwm_set:
 	rcall eeprom_read
 	sbis _SFR_IO_ADDR(EEDR), EEP_FLAGS0_BAT_LOW_DIM
 	rjmp vbat_low_endif
-
-	ldi r22, 0xFF
-	out _SFR_IO_ADDR(OCR0B), r22
 
 	rcall vbat_low_lvl
 	cpi r30, EEP_VBAT_LOW_LVLS_C
