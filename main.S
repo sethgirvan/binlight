@@ -38,9 +38,9 @@
  *
  * PB2 (ADC1) is connected through a resistor divider to the battery (Vin). On
  * the MTN-10DD this resistor divider looks like:
- *             _____       _____
+ *             _____       ____
  *   (BAT+)---|19.1k|--*--|4.7k|---(BAT-)
- *            ------   |  -----
+ *             -----   |   ----
  *                     |
  *                   (PB2)
  *
@@ -50,6 +50,15 @@
  *
  * PB3 (ADC3) connects to the off-time sense capacitor. On the MTN-10DD driver,
  * this is a 1µF capacitor.
+ *
+ * PB5 (ADC0) connects to a resistor divider containing an NTC thermistor as the
+ * lower leg like:
+ *
+ *             ----       -------
+ *   (BAT+)---|4.7k|--*--|10k NTC|---(BAT-)
+ *             ----   |   -------
+ *                    |
+ *                  (PB5)
  */
 
 #include <avr/io.h>
@@ -89,10 +98,13 @@
  * the maximum usable brightness. */
 #define MODE_SF_VAL 0xFD
 
-/* Some level of delay is needed because the light is briefly turned off while
+/* Each time pwm_set() is called the light is briefly turned off while
  * checking the battery voltage, so if it is done at too high of a rate it will
- * perceptibly affect the brightness. */
-#define CFG_CHECK_VBAT_INTERVAL 100 /* units of 10 milliseconds */
+ * perceptibly affect the brightness. Also, pwm_set() steps down the brightness
+ * each time it is called while the current temperature exceeds
+ * EEP_OVERTEMP_THRESH, so we want to give some time for the temperature to
+ * stabilize between each check. */
+#define CFG_PWM_SET_INTERVAL 255 /* units of 10 milliseconds */
 
 /* 1/2 period in units of 10 milliseconds of each of the blinks. */
 #define CFG_BAT_LOW_BLINK_PERIOD 10
@@ -167,12 +179,14 @@
  *   r8: r7 + r8 = unbrick function on-time delay remaining until the unbrick
  *       counter will be reset.
  *   r9: EEP_BAT_LOW_DIM_LVL
+ *   r11: EEP_OVERTEMP_THRESH
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
  *        the output is being strobed or it is being modified for special
  *        function mode output indication.
  *   r26: Current unbrick press count (EEP_UNBRICK_PRESS_CNT).
+ *   r27: Thermal PWM duty cycle limit.
  */
 
 /*******************************************************************************
@@ -254,6 +268,27 @@ loop_10s:
 	rjmp delay_10s_tick_loop
 
 /*******************************************************************************
+ * Write r18 (which should have the ADEN and ADSC bits set high) to ADCSRA,
+ * starting a conversion, then wait for the conversion to complete before
+ * returning. ADMUX should already be set up and it should have ADLAR set so
+ * that the most significant 8 bits can be read from ADCH.
+ *
+ * Returns:
+ *   r18: The result of the conversion.
+ ******************************************************************************/
+adc_start_read:
+	out _SFR_IO_ADDR(ADCSRA), r18
+
+	/* Wait for ADC conversion to finish. It takes a total of 25 ADC clock
+	 * cycles for the first conversion, 13 for subsequent conversions. */
+adc_wait_loop:
+	sbic _SFR_IO_ADDR(ADCSRA), ADSC
+	rjmp adc_wait_loop
+
+	in r18, _SFR_IO_ADDR(ADCH)
+	ret
+
+/*******************************************************************************
  * Read the off-time capacitor voltage from ADC3 (PB3).
  *
  * Returns:
@@ -271,44 +306,24 @@ vofft_read:
 	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
 	 * datasheet. */
 	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	out _SFR_IO_ADDR(ADCSRA), r18
-
-	/* Wait for ADC conversion to finish. It takes a total of 25 ADC clock
-	 * cycles for the first conversion, 13 for subsequent conversions. */
-off_time_adc_wait:
-	sbic _SFR_IO_ADDR(ADCSRA), ADSC
-	rjmp off_time_adc_wait
-
-	in r18, _SFR_IO_ADDR(ADCH)
-	ret
+	rjmp adc_start_read /* tail-call optimization */
 
 /*******************************************************************************
  * Read the battery voltage from ADC1 (PB2).
  *
  * Returns:
- *   r22: battery voltage
+ *   r18: battery voltage
  ******************************************************************************/
 vbat_read:
 	/* - Use internal 1.1V bandgap reference
 	 * - Left adjust the ADC result, so ADCH can just be read to get the
 	 *   most significant 8 bits.
 	 * - Enable ADC1 (PB2, Vbat sense pin) */
-	ldi r22, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
-	out _SFR_IO_ADDR(ADMUX), r22
+	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r18
 
-	/* Potential optimization: replace next two instructions with:
-	 *   sbi ADCSRA ADSC
-	 * assuming ADCSRA has already been configured by the off-time sense
-	 * code. */
-	ldi r22, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	out _SFR_IO_ADDR(ADCSRA), r22
-
-vbat_read_adc_wait:
-	sbic _SFR_IO_ADDR(ADCSRA), ADSC
-	rjmp vbat_read_adc_wait
-
-	in r22, _SFR_IO_ADDR(ADCH)
-	ret
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	rjmp adc_start_read /* tail-call optimization */
 
 /*******************************************************************************
  * Load a byte from EEPROM
@@ -654,10 +669,10 @@ mode_next_quick_commit:
  *        EEP_VBAT_LOW_LVLS[0]. Lower battery voltages correspond to higher
  *        indices.
  * Registers:
- *   r17, r18, r22: temp
+ *   r17, r18: temp
  ******************************************************************************/
 vbat_low_lvl:
-	rcall vbat_read /* Vbat in r22 */
+	rcall vbat_read /* Vbat in r18 */
 
 	/* Check EEP_VBAT_LOW_LVLS from lowest to highest. */
 	ldi r30, EEP_VBAT_LOW_LVLS_C
@@ -682,7 +697,7 @@ vbat_low_lvls_loop:
 	 * <= 255 - EEP_BAT_LOW_HYST. */
 	add r17, r1 /* r1 holds EEP_BAT_LOW_HYST */
 vbat_low_lvls_nohyst:
-	cp r22, r17
+	cp r18, r17
 	brsh vbat_low_lvls_loop
 
 vbat_low_lvls_loop_end:
@@ -708,6 +723,7 @@ vbat_low_lvls_update_dim_lvl_endif:
  *        timer_init() about this.
  * Registers:
  *   r17, r22: temp
+ *   r27: Thermal PWM limit
  *
  * Returns:
  *   r30: The current level index in EEP_VBAT_LOW_LVLS or 255 if Vbat is above
@@ -725,6 +741,12 @@ vbat_low_lvls_update_dim_lvl_endif:
  * resistance, etc minimized. And more importantly, we get a consistent measure
  * of the battery voltage which is not changing as the PWM output changes state
  * or based on the current duty cycle.
+ *
+ * The brightness may be halved or doubled (up to duty cycle passed in r14)
+ * each time this function is called based on the measured temperature and the
+ * thermal throttling limits. It is expected to call this function approximately
+ * every 2.5 seconds as a reasonable amount of time between each step-down of
+ * the brightness, but the exact timing is not critical.
  ******************************************************************************/
 pwm_set:
 	/* Check global low bat dimming enable flag */
@@ -754,6 +776,67 @@ pwm_set:
 	mov r14, r22
 
 vbat_low_endif:
+temp_read:
+	/* Load EEP_OVERTEMP_HYST into r17 */
+	ldi r17, EEP_OVERTEMP_HYST
+	rcall eeprom_read
+	in r17, _SFR_IO_ADDR(EEDR)
+
+	/* - Use Vcc as the analog reference.
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC0 (PB5, temp sense) */
+	ldi r18,  BIT(ADLAR)
+	out _SFR_IO_ADDR(ADMUX), r18
+	/* Start a single conversion. Division factor of 32 between the system
+	 * clock and the ADC input clock for an ADC input frequency of 150kHz
+	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
+	 * datasheet. */
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	rcall adc_start_read
+
+	/* Check if the temperature has dropped below the threshold plus
+	 * hysteresis, in which case any enforced thermal throttling is reduced.
+	 *
+	 * r17 = EEP_OVERTEMP_THRESH + EEP_OVERTEMP_HYST
+	 * r18 = ADC value
+	 * NOTE: We do not check for overflow here (to save instructions). It is
+	 * up to the user to ensure
+	 * EEP_OVERTEMP_HYST <= 255 - EEP_OVERTEMP_THRESH. */
+	add r17, r11
+	cp r18, r17
+	 /* Using an NTC thermistor: higher voltage means lower temperature */
+	brlo therm_undim_endif
+	/* The temperature has dropped below our threshold including hysteresis.
+	 * Increase the maximum allowed brightness. */
+	lsr r27
+	brcc therm_undim_ovflw_endif /* Handle overflow to saturate at 0xFF */
+	ldi r27, 0xFF
+therm_undim_ovflw_endif:
+therm_undim_endif:
+
+	/* Check if the temperature exceeds the threshold, in which case thermal
+	 * throttling is enforced. */
+	cp r18, r11 /* EEP_OVERTEMP_THRESH in r11, ADC value in r18 */
+	brsh therm_dim_endif
+
+	/* Approximately halve the maximum allowed brightness starting with the
+	 * currently set brightness, with minimum duty cycle just above 0. */
+
+	/* Set r27 to the min of r27 and r14 */
+	cp r27, r14
+	brlo therm_dim_min_endif
+	mov r27, r14
+therm_dim_min_endif:
+	lsr r27
+	andi r27, 1
+
+therm_dim_endif:
+	/* Enforce thermal maximum duty cycle limit in r27 */
+	cp r27, r14
+	brsh therm_limit_endif
+	mov r14, r27
+therm_limit_endif:
 	com r14
 	out _SFR_IO_ADDR(OCR0B), r14
 	ret
@@ -854,7 +937,7 @@ check_vbat_loop:
 	brne vbat_low_indicate
 
 check_vbat_low_endif:
-	ldi r16, CFG_CHECK_VBAT_INTERVAL
+	ldi r16, CFG_PWM_SET_INTERVAL
 	rcall delay_10ms_tick
 	rjmp check_vbat_loop
 
@@ -984,7 +1067,7 @@ sf_state_vbat_indicate:
 	 */
 vbat_read_loop:
 	rcall vbat_read
-	mov r19, r22
+	mov r19, r18
 	ldi r29, 8
 	rcall indicate_bin
 
@@ -1100,6 +1183,7 @@ main:
 	/* Setup registers */
 	clr r0
 	clr r6 /* Disable on-time watchdog interrupt countdown. */
+	ldi r27, 0xFF /* No thermal dimming initially */
 
 
 	/* Setup output pins */
@@ -1130,6 +1214,11 @@ main:
 	ldi r17, EEP_BAT_LOW_DIM_LVL
 	rcall eeprom_read
 	in r9, _SFR_IO_ADDR(EEDR)
+
+	/* Setup r11 with EEP_OVERTEMP_THRESH */
+	ldi r17, EEP_OVERTEMP_THRESH
+	rcall eeprom_read
+	in r11, _SFR_IO_ADDR(EEDR)
 
 	/* Handle unbrick function checking
 	 * r26: Current unbrick press count */
