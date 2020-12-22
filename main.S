@@ -1381,7 +1381,6 @@ int_wd:
 	cp r5, r0
 	breq wd_quick_mode_endif
 	dec r5
-	cp r5, r0
 	brne wd_quick_mode_expire_endif
 	rcall set_next_mode_nonquick
 wd_quick_mode_expire_endif:
@@ -1391,7 +1390,6 @@ wd_quick_mode_endif:
 	cp r6, r0
 	breq wd_on_time_endif
 	dec r6
-	cp r6, r0
 	brne wd_on_time_expire_endif
 	clr r18
 	rcall mode_commit
@@ -1402,7 +1400,6 @@ wd_on_time_endif:
 	cp r4, r0
 	breq wd_sf_bright_endif
 	dec r4
-	cp r4, r0
 	brne wd_sf_bright_expire_endif
 	ldi r17, EEP_SF_BRIGHT
 	mov r18, r23
@@ -1427,7 +1424,6 @@ wd_sf_bright_endif:
 	cp r7, r0
 	breq wd_unbrick_inc_endif
 	dec r7
-	cp r7, r0
 	brne wd_unbrick_endif
 	inc r26
 	rjmp wd_unbrick_count_commit
@@ -1435,7 +1431,6 @@ wd_unbrick_inc_endif:
 	cp r8, r0
 	breq wd_unbrick_endif
 	dec r8
-	cp r8, r0
 	brne wd_unbrick_endif
 	clr r26
 wd_unbrick_count_commit:
