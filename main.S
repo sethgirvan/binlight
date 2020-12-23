@@ -788,7 +788,7 @@ temp_read:
 	brlo therm_undim_endif
 	/* The temperature has dropped below our threshold including hysteresis.
 	 * Increase the maximum allowed brightness. */
-	lsr  r27
+	lsl  r27
 	brcc therm_undim_ovflw_endif /* Handle overflow to saturate at 0xFF */
 	ldi r27, 0xFF
 therm_undim_ovflw_endif:
@@ -808,7 +808,7 @@ therm_undim_endif:
 	mov r27, r14
 therm_dim_min_endif:
 	lsr r27
-	andi r27, 1
+	ori r27, 1
 therm_dim_endif:
 
 	/* Enforce thermal maximum duty cycle limit in r27 */
