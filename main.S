@@ -51,14 +51,14 @@
  * PB3 (ADC3) connects to the off-time sense capacitor. On the MTN-10DD driver,
  * this is a 1µF capacitor.
  *
- * PB5 (ADC0) connects to a resistor divider containing an NTC thermistor as the
+ * PB4 (ADC2) connects to a resistor divider containing an NTC thermistor as the
  * lower leg like:
  *
  *             ----       -------
  *   (BAT+)---|4.7k|--*--|10k NTC|---(BAT-)
  *             ----   |   -------
  *                    |
- *                  (PB5)
+ *                  (PB4)
  */
 
 #include <avr/io.h>
@@ -753,19 +753,14 @@ pwm_set:
 	cp r14, r22
 	brlo vbat_low_endif
 	mov r14, r22
-
 vbat_low_endif:
-temp_read:
-	/* Load EEP_OVERTEMP_HYST into r17 */
-	ldi r17, EEP_OVERTEMP_HYST
-	rcall eeprom_read
-	in r17, _SFR_IO_ADDR(EEDR)
 
+temp_read:
 	/* - Use Vcc as the analog reference.
 	 * - Left adjust the ADC result, so ADCH can just be read to get the
 	 *   most significant 8 bits.
-	 * - Enable ADC0 (PB5, temp sense) */
-	ldi r18,  BIT(ADLAR)
+	 * - Enable ADC2 (PB4, temp sense) */
+	ldi r18, BIT(ADLAR) | BIT(MUX1)
 	out _SFR_IO_ADDR(ADMUX), r18
 	/* Start a single conversion. Division factor of 32 between the system
 	 * clock and the ADC input clock for an ADC input frequency of 150kHz
@@ -773,6 +768,11 @@ temp_read:
 	 * datasheet. */
 	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
 	rcall adc_start_read
+
+	/* Load EEP_OVERTEMP_HYST into r17 */
+	ldi r17, EEP_OVERTEMP_HYST
+	rcall eeprom_read
+	in r17, _SFR_IO_ADDR(EEDR)
 
 	/* Check if the temperature has dropped below the threshold plus
 	 * hysteresis, in which case any enforced thermal throttling is reduced.
