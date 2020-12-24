@@ -188,18 +188,31 @@
 /*******************************************************************************
  * Interrupt vector table. Make sure to link with -nostdlib when using
  * avr-gcc/GNU ld or avr-libc's vector table will be included and used instead.
- * TODO Can stuff program code in unused locations.
+ *
+ * As a space optimization we stuff the beginning initialization code in the
+ * unused interrupt vector locations.
+ *
+ * Each instruction is commented with the interrupt vector it occupies, but only
+ * the watchdog timeout handler is actually used.
  ******************************************************************************/
-rjmp main /* reset handler */
-reti /* INT0 handler: unused */
-reti /* PCINT0 handler: unused */
-reti /* timer/counter overflow handler: unused */
-reti /* EEPROM ready handler: unused */
-reti /* Analog Comparator handler: unused */
-reti /* timer/counter compare match A handler: unused */
-reti /* timer/counter compare match B handler: unused */
-rjmp  int_wd /* watchdog timeout handler */
-reti /* ADC conversion complete handler: unused */
+.global main
+main:
+	/* Setup registers */
+	clr r0 /* reset handler */
+	clr r6 /* INT0 handler: unused */
+	/* No thermal dimming initially */
+	ldi r27, 0xFF /* PCINT0 handler: unused */
+
+	/* Setup output pins */
+	sbi _SFR_IO_ADDR(DDRB), PB1 /* timer/counter overflow handler: unused */
+	cbi _SFR_IO_ADDR(PORTB), PORTB3 /* EEPROM ready handler: unused */
+
+	/* Disable digital input on ADC pins to save power. */
+	ldi r16, BIT(ADC1D) | BIT(ADC2D) | BIT(ADC3D) /* Analog Comparator handler: unused */
+	out _SFR_IO_ADDR(DIDR0), r16 /* timer/counter compare match A handler: unused */
+	rjmp main_cont /* timer/counter compare match B handler: unused */
+	rjmp  int_wd /* watchdog timeout handler */
+	reti /* ADC conversion complete handler: unused */
 
 /*******************************************************************************
  * Delay in units of approximately 10 milliseconds.
@@ -1183,22 +1196,7 @@ sf_state_off_time_set_curr:
  *   r20:  MODE byte value from EEPROM
  *   r23:  PWM duty cycle (0-255)
  ******************************************************************************/
-.global main
-main:
-	/* Setup registers */
-	clr r0
-	clr r6 /* Disable on-time watchdog interrupt countdown. */
-	ldi r27, 0xFF /* No thermal dimming initially */
-
-	/* Setup output pins */
-	ldi r16, BIT(PB1)
-	out _SFR_IO_ADDR(DDRB), r16
-	/* sbi _SFR_IO_ADDR(DDRB), PB1 */
-	cbi _SFR_IO_ADDR(PORTB), PORTB3
-	/* Disable digital input on our ADC pins to save power. */
-	ldi r16, BIT(ADC3D) | BIT(ADC1D)
-	out _SFR_IO_ADDR(DIDR0), r16
-
+main_cont:
 	/* Enable watchdog timer interrupt (used for some async operations).
 	 * WDP[3:0] left as 0 to give a prescaling of 2048 cycles of the
 	 * watchdog (128kHz) timer, resulting in a period of 16ms.
