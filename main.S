@@ -322,6 +322,26 @@ vbat_read:
 	rjmp adc_start_read /* tail-call optimization */
 
 /*******************************************************************************
+ * Read the temperature from from ADC2 (PB4).
+ *
+ * Returns:
+ *   r18: ADC value indicating the temperature based on the NTC thermistor
+ ******************************************************************************/
+temp_read:
+	/* - Use Vcc as the analog reference.
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC2 (PB4, temp sense) */
+	ldi r18, BIT(ADLAR) | BIT(MUX1)
+	out _SFR_IO_ADDR(ADMUX), r18
+	/* Start a single conversion. Division factor of 32 between the system
+	 * clock and the ADC input clock for an ADC input frequency of 150kHz
+	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
+	 * datasheet. */
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	rjmp adc_start_read /* tail-call optimization */
+
+/*******************************************************************************
  * Load a byte from EEPROM
  *
  * Parameters:
@@ -755,19 +775,7 @@ pwm_set:
 	mov r14, r22
 vbat_low_endif:
 
-temp_read:
-	/* - Use Vcc as the analog reference.
-	 * - Left adjust the ADC result, so ADCH can just be read to get the
-	 *   most significant 8 bits.
-	 * - Enable ADC2 (PB4, temp sense) */
-	ldi r18, BIT(ADLAR) | BIT(MUX1)
-	out _SFR_IO_ADDR(ADMUX), r18
-	/* Start a single conversion. Division factor of 32 between the system
-	 * clock and the ADC input clock for an ADC input frequency of 150kHz
-	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
-	 * datasheet. */
-	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	rcall adc_start_read
+	rcall temp_read
 
 	/* Load EEP_OVERTEMP_HYST into r17 */
 	ldi r17, EEP_OVERTEMP_HYST
@@ -945,6 +953,20 @@ vbat_low_blink_loop_done:
 	rcall delay_10s_tick_pwm_set
 	rjmp check_vbat_loop
 
+/*******************************************************************************
+ * Output a specific bit pattern which is used to delineate separate chunks of
+ * data.
+ *
+ * Note: May want to consider doing some sort of "out-of-band" indication
+ * instead such as completely turning off the light for a period.
+ ******************************************************************************/
+sf_sync_pattern:
+	/* Output a bit pattern after each reading to help the user detect the
+	 * start of the next voltage reading.
+	 */
+	ldi r29, SF_VBAT_INDICATE_SYNC_NBITS
+	ldi r19, SF_VBAT_INDICATE_SYNC_PATTERN
+	rjmp indicate_bin /* tail-call optimization */
 
 /*******************************************************************************
  * Special function mode
@@ -974,7 +996,7 @@ sf_jmp_tbl:
 	/* 2 */ rjmp sf_state_eeprom_write
 	/* Unused special function slots */
 	/* 3 */ rjmp sf_state_retry_sel
-	/* 4 */ rjmp sf_state_retry_sel
+	/* 4 */ rjmp sf_state_temp_indicate
 	/* 5 */ rjmp sf_state_retry_sel
 	/* 6 */ rjmp sf_state_retry_sel
 	/* 7 */ rjmp sf_state_off_time_set
@@ -1047,17 +1069,7 @@ vbat_read_loop:
 	mov r19, r18
 	ldi r29, 8
 	rcall indicate_bin
-
-	/* Output a bit pattern after each reading to help the user detect the
-	 * start of the next voltage reading.
-	 *
-	 * Note: May want to consider doing some sort of "out-of-band"
-	 * indication instead such as completely turning off the light for a
-	 * period. */
-	ldi r29, SF_VBAT_INDICATE_SYNC_NBITS
-	ldi r19, SF_VBAT_INDICATE_SYNC_PATTERN
-	rcall indicate_bin
-
+	rcall sf_sync_pattern
 	rjmp vbat_read_loop
 
 /* Read a bytes starting from from a specified EEPROM address. Bytes are
@@ -1114,6 +1126,22 @@ sf_state_eeprom_write_val:
 	ldi r18, SF_STATE_RETRY_SEL
 	rcall sf_state_commit
 	rjmp sf_state_retry_sel
+
+/* Temperature is repeatedly indicated in a loop, with some spacer indication to
+ * assist with viewer synchronization with the start of each temperature
+ * reading. Tapping the power switch at this point will switch to the next mode,
+ * exiting special function mode. */
+sf_state_temp_indicate:
+	rcall set_next_mode_nonquick
+
+	/* Output the temperature repeatedly until the user switches modes. */
+temp_read_loop:
+	rcall temp_read
+	mov r19, r18
+	ldi r29, 8
+	rcall indicate_bin
+	rcall sf_sync_pattern
+	rjmp temp_read_loop
 
 /* If the light is switched off while SF_OFF_TIME_SET_WAIT_PATTERN is being
  * output, set EEP_OFF_TIME_VTHRESH to the current value of the off-time ADC
