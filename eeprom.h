@@ -49,6 +49,4 @@
 #define EEP_UNBRICK_PRESS_CNT 0x32
 #define EEP_BAT_LOW_DIM_LVL 0x33
 
-#define EEP_DEBUG_BYTE 0x3F
-
 #endif

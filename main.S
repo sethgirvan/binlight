@@ -405,20 +405,6 @@ eeprom_write_wait:
 	ret
 
 /*******************************************************************************
- * Write a value to the last byte (63) of EEPROM which can later be read out for
- * debugging purposes.
- *
- * Parameters:
- *   r18: byte value
- * Registers:
- *   r17: temp
- ******************************************************************************/
-debug_byte_eeprom:
-	ldi r17, EEP_DEBUG_BYTE
-	rcall eeprom_write
-	ret
-
-/*******************************************************************************
  * Commit new MODE value to EEPROM
  *
  * Parameters:
@@ -1335,8 +1321,6 @@ ctrl_off_time:
 
 off_time_check:
 	rcall vofft_read
-	/* Debugging: store ADC val in EEPROM debug byte. */
-	rcall debug_byte_eeprom
 
 	/* Charge up off-time sense capacitor for subsequent sensing. */
 	sbi _SFR_IO_ADDR(PORTB), PORTB3
