@@ -19,26 +19,26 @@
  */
 .byte 0
 
-/* 0x30 EEP_SF_STATE: Special function mode state. */
+/* 0x2A EEP_SF_STATE: Special function mode state. */
 .byte 0x08 /* SF_STATE_INIT */
 
-/* 0x31 EEP_SF_STATE_EEPROM_WRITE_LOC: EEPROM address (0x00-0x3F) the byte will
+/* 0x2B EEP_SF_STATE_EEPROM_WRITE_LOC: EEPROM address (0x00-0x3F) the byte will
  * be written to. */
 .byte 0x00
 
-/* 0x32 EEP_UNBRICK_PRESS_CNT: Number of times the switch has been pressed
+/* 0x2C EEP_UNBRICK_PRESS_CNT: Number of times the switch has been pressed
  * following the unbrick pattern. Once it reaches CFG_UNBRICK_PRESS_REQ, the
  * firmware will be "unbricked" by resetting some core configuration in EEPROM
  * to usable values. See "Unbrick function" in doc/usage.txt. */
 .byte 0
 
-/* 0x33 EEP_BAT_LOW_DIM_LVL: Low battery dimming level (index into
+/* 0x2D EEP_BAT_LOW_DIM_LVL: Low battery dimming level (index into
  * EEP_VBAT_LOW_LVLS or 255 if voltage is above level 0) persisted across power
  * cycles. This, in conjunction with EEP_BAT_LOW_HYST, ensures that the low
  * battery dimming remains consistent across power cycles. */
 .byte 255
 
-/* 0x34 EEP_HAND_WARMER_TEMP: Set temperature for the hand warmer special
+/* 0x2E EEP_HAND_WARMER_TEMP: Set temperature for the hand warmer special
  * function. This works the same way as EEP_OVERTEMP_THRESH, see eep_core.S.
  *
  * From the Murata NCU18XH103F60RB datasheet, it has a resistance of 3.535k at
