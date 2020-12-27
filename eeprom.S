@@ -37,3 +37,13 @@
  * cycles. This, in conjunction with EEP_BAT_LOW_HYST, ensures that the low
  * battery dimming remains consistent across power cycles. */
 .byte 255
+
+/* 0x34 EEP_HAND_WARMER_TEMP: Set temperature for the hand warmer special
+ * function. This works the same way as EEP_OVERTEMP_THRESH, see eep_core.S.
+ *
+ * From the Murata NCU18XH103F60RB datasheet, it has a resistance of 3.535k at
+ * 55 degC.
+ *
+ * ADC value = 255 / (1 + 4.7k/3.535k) = ~109
+ */
+.byte 109 /* 55 degC */

@@ -989,14 +989,14 @@ sf_switch:
 	ijmp
 
 sf_jmp_tbl:
-	/* 8 user-selectable special functions */
+	/* 8 user-selectable special functions
+	 * sf_state_retry_sel slots are currently unused */
 	/* 0 */ rjmp sf_state_vbat_indicate
 	/* 1 */ rjmp sf_state_eeprom_read
 	/* 2 */ rjmp sf_state_eeprom_write
-	/* Unused special function slots */
 	/* 3 */ rjmp sf_state_retry_sel
 	/* 4 */ rjmp sf_state_temp_indicate
-	/* 5 */ rjmp sf_state_retry_sel
+	/* 5 */ rjmp sf_state_hand_warmer
 	/* 6 */ rjmp sf_state_retry_sel
 	/* 7 */ rjmp sf_state_off_time_set
 
@@ -1141,6 +1141,34 @@ temp_read_loop:
 	rcall indicate_bin
 	rcall sf_sync_pattern
 	rjmp temp_read_loop
+
+/* Modulate the brightness to try to maintain the target temperature set in
+ * EEP_HAND_WARMER_TEMP. This is so the flashlight can be used as a hand warmer
+ * or for whatever other warming needs. We just overwrite r11 with
+ * EEP_HARD_WARMER_TEMP instead of the usual EEP_OVERTEMP_THRESH, then set the
+ * flashlight to maximum brightness and call normal_mode() and let pwm_set() try
+ * to maintain the max set temp as usual.
+ *
+ * One could achieve the same effect as this special function by just setting
+ * EEP_OVERTEMP_THRESH to the desired temperature and setting the flashlight to
+ * maximum brightness, but it would be inconvenient to have to change
+ * EEP_OVERTEMP_THRESH and change it back after.
+ *
+ * The same EEP_OVERTEMP_HYST value is used as is used with normal thermal
+ * throttling, which due to the nonlinearity of the voltage generated with the
+ * NTC thermistor may not be ideal if EEP_HAND_WARMER_TEMP is significantly
+ * different than EEP_OVERTEMP_THRESH, but we just use the same value to save
+ * code space.
+ */
+sf_state_hand_warmer:
+	ldi r17, EEP_HAND_WARMER_TEMP
+	rcall eeprom_read
+	in r11, _SFR_IO_ADDR(EEDR)
+	/* Start at max duty cycle and then pwm_set() will module the brightness
+	 * down as necessary to try to maintain approximately the specified
+	 * temp. */
+	ldi r23, 0xFF
+	rcall normal_mode
 
 /* If the light is switched off while SF_OFF_TIME_SET_WAIT_PATTERN is being
  * output, set EEP_OFF_TIME_VTHRESH to the current value of the off-time ADC

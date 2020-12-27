@@ -28,7 +28,8 @@ Special function mode
    - 0 (0 - 0 - 0): vbat_indicate: Indicate battery voltage
    - 1 (0 - 0 - 1): eeprom_read: Read from EEPROM
    - 2 (0 - 1 - 0): eeprom_write: Write to EEPROM
-   - 4 (1 - 0 - 0):temp_indicate: Indicate the temperature
+   - 4 (1 - 0 - 0): temp_indicate: Indicate the temperature
+   - 5 (1 - 0 - 1): hard_warmer: Maintain set hand warmer temperature
    - 7 (1 - 1 - 1): off_time_set: Set the off-time
    Some special functions that might be implemented in the future:
    - Set timer
