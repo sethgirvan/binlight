@@ -222,4 +222,4 @@
 
 /* 0x27 EEP_VER: Firmware version. Including this in EEPROM allows reading it
  * out at runtime with eeprom_read. */
-.byte 1
+.byte 2
