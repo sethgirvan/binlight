@@ -1,7 +1,3 @@
-TODO
-----
- - Switch indicate_bin to most significant bit first.
-
 Add if possible
 ---------------
  - Timer. Probably with 10 second granularity.

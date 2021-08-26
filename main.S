@@ -130,20 +130,20 @@
 
 /* Bit pattern output when entering special function mode: The 4 bits '0101'
  * (output from least to most significant bit, so output as 1 - 0 - 1 - 0). */
-#define SF_ENTERED_NBITS 4
+#define SF_ENTERED_NBITS BIT(3) /* one-hot for indicate_bin */
 #define SF_ENTERED_PATTERN 0x5
 /* Bit pattern output to indicate that the special function selection will be
  * retried (output chronologically as 1 - 1 - 0 - 0). */
-#define SF_RETRY_SEL_NBITS 4
+#define SF_RETRY_SEL_NBITS BIT(3) /* one-hot for indicate_bin */
 #define SF_RETRY_SEL_PATTERN 0x3
 /* Bit pattern output between battery voltage indications. */
-#define SF_VBAT_INDICATE_SYNC_NBITS 4
+#define SF_VBAT_INDICATE_SYNC_NBITS BIT(3) /* one-hot for indicate_bin */
 #define SF_VBAT_INDICATE_SYNC_PATTERN 0x0E
 /* Bit pattern output to while waiting for the user to switch off the light in
  * order to set the off time. The number of bits, combined with
  * EEP_SF_INDICATE_PERIOD, determines how long we will wait before cancelling
  * the operation. */
-#define SF_OFF_TIME_SET_WAIT_NBITS 8
+#define SF_OFF_TIME_SET_WAIT_NBITS BIT(7) /* one-hot for indicate_bin */
 #define SF_OFF_TIME_SET_WAIT_PATTERN 0xAA
 
 /* We actually use the delta CFG_UNBRICK_ON_TIME_1 - CFG_UNBRICK_ON_TIME_0
@@ -153,7 +153,7 @@
 #define CFG_UNBRICK_ON_TIME_1 125 /* 2000ms. Units of ~16 milliseconds. */
 #define CFG_UNBRICK_PRESS_REQ 64
 #define CFG_UNBRICK_INDICATE_BRIGHT 0x40 /* Unbrick indication brightness */
-#define CFG_UNBRICK_INDICATE_NBITS 4
+#define CFG_UNBRICK_INDICATE_NBITS BIT(3) /* one-hot for indicate_bin */
 #define CFG_UNBRICK_INDICATE_PATTERN 0xC
 
 .section .text
@@ -434,17 +434,18 @@ sf_state_commit:
  * Indicate binary data by flashing the light.
  *
  * 0s are represented as a transition from 0% to 12.5% of SF_BRIGHT and 1s as a
- * transition from 50% to 100% of SF_BRIGHT. For example for the sequence of
- * 3 bits '011' (r17 = 3, r19 = 0x6):
- * | bit 0  |   bit 1    |  bit 2   |
+ * transition from 50% to 100% of SF_BRIGHT. Bits are output most significant
+ * bit first. For example for the sequence of
+ * 3 bits '011' (r29 = BIT(3), r19 = 0x3):
+ * | bit 2  |   bit 1    |  bit 0   |
  * 0% - 12.5% - 50% - 100% - 50% - 100%
  *
  * This scale is used (versus something like 0% to 25% and 50% to 100%) to try
  * to match humans' logarithmic-y perception of brightness.
  *
  * Parameters:
- *   r29: Number of bits to indicate (anything past 8 will just be padded with
- *        trailing 0s).
+ *   r29: Number of bits to indicate in one-hot notation. eg 0x08 would output
+ *        the least significant 4 bits of r19.
  *   r19: Data to output. The least significant bits are used.
  * Registers:
  *   r10: Duty cycle for first half of bit
@@ -461,10 +462,11 @@ indicate_bin:
 	rcall eeprom_read
 	in r16, _SFR_IO_ADDR(EEDR)
 indicate_bin_loop:
-	subi r29, 1
-	brlo indicate_bin_restore
-	sbrs r19, 0
-	rjmp indicate_0
+	cp r29, 0
+	breq indicate_bin_restore
+	mov r17, r29
+	and r17, r19
+	breq indicate_0
 indicate_1:
 	/* ~50% */
 	mov r10, r23
@@ -496,7 +498,7 @@ indicate_endif:
 	rcall pwm_set
 	rcall delay_10ms_tick
 
-	lsr r19
+	lsr r29
 	rjmp indicate_bin_loop
 
 indicate_bin_restore:
@@ -1066,7 +1068,7 @@ sf_state_vbat_indicate:
 vbat_read_loop:
 	rcall vbat_read
 	mov r19, r18
-	ldi r29, 8
+	ldi r29, BIT(7)
 	rcall indicate_bin
 	rcall sf_sync_pattern
 	rjmp vbat_read_loop
@@ -1091,7 +1093,7 @@ loop_sf_eeprom_read:
 	mov r17, r28
 	rcall eeprom_read
 	in r19, _SFR_IO_ADDR(EEDR)
-	ldi r29, 8
+	ldi r29, BIT(7)
 	rcall indicate_bin
 	inc r28
 	andi r28, 0x3F
@@ -1137,7 +1139,7 @@ sf_state_temp_indicate:
 temp_read_loop:
 	rcall temp_read
 	mov r19, r18
-	ldi r29, 8
+	ldi r29, BIT(7)
 	rcall indicate_bin
 	rcall sf_sync_pattern
 	rjmp temp_read_loop
