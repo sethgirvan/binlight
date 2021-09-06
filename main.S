@@ -176,6 +176,7 @@
  *       counter will be reset.
  *   r9: EEP_BAT_LOW_DIM_LVL
  *   r11: EEP_OVERTEMP_THRESH
+ *   r12: Off time capacitor sensed voltage
  *   r20: Current mode number.
  *   r23: Current mode brightness (PWM duty cycle). The complement of the value
  *        in the output compare register (OCR0B) may differ from this value if
@@ -296,26 +297,6 @@ adc_wait_loop:
 
 	in r18, _SFR_IO_ADDR(ADCH)
 	ret
-
-/*******************************************************************************
- * Read the off-time capacitor voltage from ADC3 (PB3).
- *
- * Returns:
- *   r18: off-time capacitor voltage.
- ******************************************************************************/
-vofft_read:
-	/* - Use the internal 1.1V bandgap reference.
-	 * - Left adjust the ADC result, so ADCH can just be read to get the
-	 *   most significant 8 bits.
-	 * - Enable ADC3 (PB3, off-time sense) */
-	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX1) | BIT(MUX0)
-	out _SFR_IO_ADDR(ADMUX), r18
-	/* Start a single conversion. Division factor of 32 between the system
-	 * clock and the ADC input clock for an ADC input frequency of 150kHz
-	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
-	 * datasheet. */
-	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
-	rjmp adc_start_read /* tail-call optimization */
 
 /*******************************************************************************
  * Read the battery voltage from ADC1 (PB2).
@@ -1195,7 +1176,7 @@ sf_state_off_time_set:
 	rjmp sf_state_retry_sel
 
 sf_state_off_time_set_curr:
-	rcall vofft_read
+	mov r18, r12
 	ldi r17, EEP_OFF_TIME_VTHRESH
 	rcall eeprom_write
 
@@ -1307,6 +1288,33 @@ unbrick_count_endif:
 	rcall eeprom_read
 	in r20, _SFR_IO_ADDR(EEDR)
 
+	/* We need to charge up the off-time capacitor (and therefore also read
+	 * its voltage before that) unconditionally, whether in on-time or
+	 * off-time control mode, because the off-time sense capacitor charging
+	 * needs to be enabled in case we happen to be in
+	 * SF_STATE_OFF_TIME_SET_CURR in order to properly set the off-time. */
+
+	/* Read off-time capacitor voltage:
+	 *
+	 * - Use the internal 1.1V bandgap reference.
+	 * - Left adjust the ADC result, so ADCH can just be read to get the
+	 *   most significant 8 bits.
+	 * - Enable ADC3 (PB3, off-time sense) */
+	ldi r18, BIT(REFS0) | BIT(ADLAR) | BIT(MUX1) | BIT(MUX0)
+	out _SFR_IO_ADDR(ADMUX), r18
+	/* Start a single conversion. Division factor of 32 between the system
+	 * clock and the ADC input clock for an ADC input frequency of 150kHz
+	 * given a 4.8MHz system clock, within the 200kHz max recommended by the
+	 * datasheet. */
+	ldi r18, BIT(ADEN) | BIT(ADSC) | BIT(ADPS2) | BIT(ADPS0)
+	rcall adc_start_read
+	mov r12, r18
+
+	/* Charge up off-time sense capacitor for subsequent sensing. */
+	sbi _SFR_IO_ADDR(PORTB), PORTB3
+	sbi _SFR_IO_ADDR(DDRB), PB3
+
+
 	/* Check whether set to on-time or off-time mode */
 	ldi r17, EEP_FLAGS0
 	rcall eeprom_read
@@ -1337,32 +1345,25 @@ ctrl_on_time:
  * seconds.
  *
  * Registers:
- * r22 - Configured off-time voltage threshold
- * r21 - Sensed off-time voltage
+ * r22 - EEP_SF_STATE, configured off-time voltage threshold
  ******************************************************************************/
 ctrl_off_time:
 	/* Bypass off-time expiration check when the off-time is being measured
 	 * as part of the SF_STATE_OFF_TIME_SET special function. */
 	ldi r17, EEP_SF_STATE
 	rcall eeprom_read
-	in r18, _SFR_IO_ADDR(EEDR)
-	cpi r18, SF_STATE_OFF_TIME_SET_CURR
+	in r22, _SFR_IO_ADDR(EEDR)
+	cpi r22, SF_STATE_OFF_TIME_SET_CURR
 	breq off_time_endif
 
 off_time_check:
-	rcall vofft_read
-
-	/* Charge up off-time sense capacitor for subsequent sensing. */
-	sbi _SFR_IO_ADDR(PORTB), PORTB3
-	sbi _SFR_IO_ADDR(DDRB), PB3
-
 	/* Load off-time voltage threshold setting from EEPROM */
 	ldi r17, EEP_OFF_TIME_VTHRESH
 	rcall eeprom_read
 	in r22, _SFR_IO_ADDR(EEDR)
 
 	/* If Vsense >= Vthresh */
-	cp r18, r22
+	cp r12, r22
 	brsh off_time_endif
 
 	/* Reset mode */
