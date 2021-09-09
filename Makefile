@@ -54,7 +54,11 @@ flash: $(TARGET)
 flash-eeprom: $(EEPROM_TARGET)
 	avrdude -c $(PROGRAMMER) -p $(AVRDUDE_MCU) -U eeprom:w:$<:i
 
-HFUSE ?= 0xFF
+# Set BODLEVEL[1:0] to '10' to set the Brown-Out Detection voltage (Vbot) to
+# 1.8V (typ). I think enabling brown-out detection is useful because we do not
+# corruption when writing to EEPROM. For example it could cause the unbrick
+# feature to be incorrectly triggered.
+HFUSE ?= 0xFD
 # Use 4.8MHz internal clock source; Startup delay of 14CK + 4ms "Fast rising
 # power"; Preserve EEPROM through chip erase.
 # To use The 9.6MHz clock source, change to 0x76.
