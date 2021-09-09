@@ -36,8 +36,6 @@ Maybe
  - Immediately repeat low battery indication blinks when Vbat drops to a lower
    CFG_VBAT_LOW_LVLS level rather than always waiting for
    CFG_BAT_LOW_BLINK_INTERVAL to completely expire.
- - Add support for an NTC thermistor connected somehow to use for temperature
-   limiting and binary temperature readout.
  - It may be simpler to use if every special function is just a separate special
    mode. For example, one could have quick mode 4 be vbat_indicate, quick mode
    5 be eeprom_read, quick mode 6 be eeprom_write, etc rather than the current
