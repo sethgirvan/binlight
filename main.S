@@ -395,8 +395,7 @@ eeprom_write_wait:
  ******************************************************************************/
 mode_commit:
 	ldi r17, EEP_MODE
-	rcall eeprom_write
-	ret
+	rjmp eeprom_write /* tail-call optimization */
 
 /*******************************************************************************
  * Commit a new SF_STATE value to EEPROM
@@ -408,8 +407,7 @@ mode_commit:
  ******************************************************************************/
 sf_state_commit:
 	ldi r17, EEP_SF_STATE
-	rcall eeprom_write
-	ret
+	rjmp eeprom_write /* tail-call optimization */
 
 /*******************************************************************************
  * Indicate binary data by flashing the light.
@@ -484,8 +482,7 @@ indicate_endif:
 
 indicate_bin_restore:
 	mov r14, r23
-	rcall pwm_set
-	ret
+	rjmp pwm_set /* tail-call optimization */
 
 /*******************************************************************************
  * Read binary data input by pushing the power switch.
@@ -565,8 +562,7 @@ input_bin_done:
 	clr r18
 	rcall eeprom_write
 	ldi r17, EEP_INPUT_BIN_STATE_BUF
-	rcall eeprom_write
-	ret
+	rjmp eeprom_write /* tail-call optimization */
 
 /*******************************************************************************
  * Calculate the next non-quick mode when currently not in a quick mode.
@@ -616,8 +612,7 @@ set_next_nonquick_curr_nonquick:
 
 	/* r18 holds next mode */
 set_next_nonquick_curr_quick_endif:
-	rcall mode_commit
-	ret
+	rjmp mode_commit /* tail-call optimization */
 
 /*******************************************************************************
  * Until the quick mode on-time delay (EEP_QUICK_TIME) expires, the next mode is
@@ -859,8 +854,7 @@ sf_reset_state:
 	ldi r17, EEP_INPUT_BIN_STATE_BITC
 	rcall eeprom_write
 	ldi r17, EEP_INPUT_BIN_STATE_BUF
-	rcall eeprom_write
-	ret
+	rjmp eeprom_write /* tail-call optimization */
 
 /*******************************************************************************
  * Activate the currently configured mode.
