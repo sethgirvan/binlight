@@ -151,7 +151,7 @@
  * a value up to 255 + CFG_UNBRICK_ON_TIME_0. */
 #define CFG_UNBRICK_ON_TIME_0 31 /* ~500ms. Units of ~16 milliseconds. */
 #define CFG_UNBRICK_ON_TIME_1 125 /* 2000ms. Units of ~16 milliseconds. */
-#define CFG_UNBRICK_PRESS_REQ 64
+#define CFG_UNBRICK_PRESS_REQ 32
 #define CFG_UNBRICK_INDICATE_BRIGHT 0x40 /* Unbrick indication brightness */
 #define CFG_UNBRICK_INDICATE_NBITS BIT(3) /* one-hot for indicate_bin */
 #define CFG_UNBRICK_INDICATE_PATTERN 0xC
