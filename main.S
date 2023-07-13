@@ -54,9 +54,9 @@
  * PB4 (ADC2) connects to a resistor divider containing an NTC thermistor as the
  * lower leg like:
  *
- *             ----       -------
- *   (BAT+)---|4.7k|--*--|10k NTC|---(BAT-)
- *             ----   |   -------
+ *             ---       -------
+ *   (BAT+)---|47k|--*--|100k NTC|---(BAT-)
+ *             ---   |   -------
  *                    |
  *                  (PB4)
  */

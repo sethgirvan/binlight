@@ -109,7 +109,13 @@
  * Set all to 0 to disable (eg if your driver does not have a battery voltage
  * sense connection).
  *
- * Using a  V+ -- 19.9k -*- 4.7k -- GND  voltage divider configuration (with no
+ * Using a
+ *
+ *   V+ -- 19.9k -*- 4.7k -- GND
+ *                \
+ *                 \__ADC
+ *
+ * voltage divider configuration (with no
  * diode in front of the divider):
  *   ADC value = 255 * Vbat * 4.7k / (1.1V * (19.1k + 4.7k))
  * ie:
@@ -166,14 +172,19 @@
  * it to a more sensible unit).
  *
  * We set the ADC reference to Vcc and expect an NTC thermistor connected as the
- * lower leg of a resistor divider like: V+ -- 4.7k -*- 10k NTC -- GND
+ * lower leg of a resistor divider like:
+ *
+ *  V+ -- 47k -*- 100k NTC -- GND
+ *              \
+ *               \__ADC
+ *
  * So the measured voltage is ratiometric with the supply voltage.
  *
  * First determine the resistance of your NTC thermistor at the desired
- * threshold temperature, then calculate the read ADC value as (if using a 4.7k
+ * threshold temperature, then calculate the read ADC value as (if using a 47k
  * resistor for the top leg):
  *
- *   ADC value = 255 / (1 + 4.7k/Rntc)
+ *   ADC value = 255 / (1 + 47k/Rntc)
  *
  * The manufacturer of your NTC thermistor should provide tables of resistance
  * values at temperature steps that you can read from directly and/or one or
@@ -181,23 +192,25 @@
  * resistance at a given temperature using some variant of the Steinhart-Hart
  * equation.
  *
- * For example I am using an 0603 Murata NCU18XH103F60RB NTC thermistor
- * (https://www.digikey.com/en/products/detail/murata-electronics/NCU18XH103F60RB/7363023)
- * which has an R25 of 10k, and a B25/50 of 3380K. Looking at the NCU series XH
- * material (3380K) 10k column (NCU__XH103) in the chart in the datasheet we see
- * an expected resistance of 1.925k at 75 degC (348.15K).
+ * For example I am using an 0201 TDK NTCG064EF104FTBX NTC thermistor
+ * (https://www.digikey.com/en/products/detail/tdk-corporation/NTCG064EF104FTBX/5285702)
+ * which has an R25 of 100k, and a B25/75 of 4293K (If the manufacturer has
+ * multiple B25/XX values available, choose the XX that is closest to your
+ * desired overtemp threshold. Here 75C). Downloading the 'RT Sheet' CSV TDK
+ * provides on its website for the NTCG064EF104FTBX we see the nominal
+ * resistance at 75C is 12.64k.
  *
- * Alternatively, using the B25/85 value of 3455K to calculate
+ * Alternatively, using the B25/75 value of 4293K to calculate at 75C (348.15K)
  *
- *   R = 10k * e^(3455 * (1/348.15 - 1/298.15)) = ~1.893k
+ *   R = 100k * e^(4293 * (1/348.15 - 1/298.15)) = ~12.645k
  *
- * Using Rntc at 75C = 1.925k, we get
+ * Using Rntc at 75C = 12.64k, we get
  *
- *   ADC value = 255 / (1 + 4.7k/1.925k) = ~74
+ *   ADC value = 255 / (1 + 47k/12.64k) = ~54
  *
  * Set to 0 to disable.
  */
-.byte 74 /* 75 degC */
+.byte 54 /* 75 degC */
 
 /* 0x26 EEP_OVERTEMP_HYST: Hysteresis applied to EEP_OVERTEMP_THRESH before
  * increasing the brightness again after it has been decreased due to
@@ -209,12 +222,12 @@
  * between brightness levels as the temperature fluctuates back and forth.
  *
  * For a hysteresis of 5 degC (plus the natural hysteresis due to the thermal
- * lag) we see from the NCU18XH103F60RB datasheet that the resistance at 70 degC
- * is 2.228, giving us an ADC value of:
+ * lag) we see from the NTCG064EF104FTBX 'RT Sheet' that the resistance at 70
+ * degC is 15.18k, giving us an ADC value of:
  *
- *   ADC value = 255 / (1 + 4.7k/2.228) = ~82
+ *   ADC value = 255 / (1 + 47k/15.18) = ~62
  *
- * a difference of 8 from a EEP_OVERTEMP_THRESH of 74.
+ * a difference of 8 from a EEP_OVERTEMP_THRESH of 54.
  *
  * EEP_OVERTEMP_HYST must be <= 255 - EEP_OVERTEMP_THRESH to prevent overflow.
  */
