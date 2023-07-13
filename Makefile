@@ -43,11 +43,11 @@ $(OBJECTS): %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 
-.PHONY: flash-all
-flash-all: flash flash-eeprom flash-fuse
-
 .PHONY: flash
-flash: $(TARGET)
+flash: flash-program flash-eeprom flash-fuse
+
+.PHONY: flash-program
+flash-program: $(TARGET)
 	avrdude -c $(PROGRAMMER) -p $(AVRDUDE_MCU) -U flash:w:$(TARGET):i
 
 .PHONY: flash-eeprom

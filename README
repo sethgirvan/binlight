@@ -77,15 +77,15 @@ Then run
 
   # make flash
 
-to flash just the program memory,
+To flash the program memory, eeprom, and fuses, or
+
+  # make flash-program
+
+to flash just the program memory, or
 
   # make flash-eeprom
 
-to flash just the EEPROM, or
-
-  # make flash-all
-
-to flash both.
+to flash just the EEPROM
 
 Usage
 -----
