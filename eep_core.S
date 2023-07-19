@@ -111,7 +111,7 @@
  *
  * Using a
  *
- *   V+ -- 19.9k -*- 4.7k -- GND
+ *   V+ -- 19.1k -*- 4.7k -- GND
  *                \
  *                 \__ADC
  *
@@ -129,7 +129,7 @@
  * ie:
  *   ADC value = 255 * (Vbat - Vf) * R2 / (1.1V * (R1 + R2))
  *
- * The following values are for R1=19.9k, R2=4.7k with no diode.
+ * The following values are for R1=19.1k, R2=4.7k with no diode.
  *
  * All values must be <= to 255 minus EEP_BAT_LOW_HYST, otherwise the level
  * checking in vbat_low_lvl() will be messed up.
