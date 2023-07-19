@@ -73,12 +73,16 @@ Flashing
 --------
 
 Change the line
-  AVRDUDE_MCU ?= t13
+
+    AVRDUDE_MCU ?= t13
+
 in the Makefile if you are using a different microcontroller than the ATtiny13A.
 Run `avrdude -p ?` to get the list of avrdude microcontroller names.
 
 Change the line
-  PROGRAMER ?= usbasp
+
+    PROGRAMER ?= usbasp
+
 in the Makefile if you are not using a USBASP AVR programmer. Run
 `avrudude -c ?` to get the list of programmer names.
 
