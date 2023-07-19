@@ -6,20 +6,20 @@ switch being pressed as part of some meaningful input. The two types of state
 information used here are on-time and off-time.
 
 on-time
-~~~~~~~
+-------
 
 The basic mechanism of on-time control is that it is determined that during some
 point in the program execution the user turning the light off and back on will
 have some meaning. The basic way this is implemented here is:
 
- - Store in EEPROM the state data that when read on startup indicates that the
-   switch was tapped (the light was turned off and back on). Then wait for the
-   specified on-time delay and set the state in EEPROM to indicate that the
-   switch was not pressed. If the switch was pressed during the on-time delay,
-   the state in EEPROM will setup correspondingly.
+- Store in EEPROM the state data that when read on startup indicates that the
+  switch was tapped (the light was turned off and back on). Then wait for the
+  specified on-time delay and set the state in EEPROM to indicate that the
+  switch was not pressed. If the switch was pressed during the on-time delay,
+  the state in EEPROM will setup correspondingly.
 
 off-time
-~~~~~~~~
+--------
 
 The software side of off-time control is a bit more intuitive than on-time
 control. We just check the voltage at the off-time capacitor which can be

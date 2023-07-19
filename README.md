@@ -1,9 +1,10 @@
 binlight
 ========
 
-Firmware for ATtiny13(A) and ATtiny85 (and probably others) -based flashlight
-drivers. It is written in AVR assembly and includes some some unusual features
-while still fitting in the meager 1KiB of flash program memory on the ATtiny13A.
+Firmware for ATtiny13(A) and ATtiny85 (and probably other AVRs) -based
+flashlight drivers. It is written in AVR assembly and includes some some unusual
+features while still fitting in the meager 1KiB of flash program memory on the
+ATtiny13A.
 
 Features
 --------
@@ -26,7 +27,7 @@ Features
    temperature readouts are raw ADC values which you can then calculate the
    voltage and temperature in degrees from based on component values used.
 
-   By changing the bytes in EEPROM with the eeprom_write special function,
+   By changing the bytes in EEPROM with the `eeprom_write` special function,
    almost all configuration values, including mode settings, can be changed on
    the fly without reprogramming.
 
@@ -58,7 +59,9 @@ Building
 --------
 
 Ensure the required dependencies above are installed. Change the line
-  MCU ?= attiny13a
+
+    MCU ?= attiny13a
+
 in the Makefile if you are using a different microcontroller than the ATtiny13A.
 See `--mmcu` option documentation in `man 1 avr-gcc` for the list of
 microcontroller names.
@@ -81,22 +84,22 @@ in the Makefile if you are not using a USBASP AVR programmer. Run
 
 Then run
 
-  # make flash
+    # make flash
 
 To flash the program memory, eeprom, and fuses, or
 
-  # make flash-program
+    # make flash-program
 
 to flash just the program memory, or
 
-  # make flash-eeprom
+    # make flash-eeprom
 
 to flash just the EEPROM
 
 Usage
 -----
 
-See `doc/usage.txt` for an explanation of how to use the modes and special
+See `doc/usage.md` for an explanation of how to use the modes and special
 functions.
 
 Configuration
@@ -130,7 +133,7 @@ Learning AVR assembly
 In addition to the part datasheet and the AVR Instruction Set Manual, these are
 some resources I found helpful in learning to program AVRs in assembly:
 
- - http://www.elektronik-labor.de/AVR/KursAssembler/T13asm13.html
+ - <http://www.elektronik-labor.de/AVR/KursAssembler/T13asm13.html>
    - A cute tutorial which also includes a brief introduction to the actual
      machine code and the SPI programming protocol.
    - In German, but I found the Google Translate English translation mostly
@@ -139,8 +142,8 @@ some resources I found helpful in learning to program AVRs in assembly:
        one may want to cross-reference the untranslated version's program
        listings.
    - Does not use GNU as / avr-gcc, so you will want to reference the GNU as
-     manual: https://sourceware.org/binutils/docs/as/ (or `info as`).
+     manual: <https://sourceware.org/binutils/docs/as/> (or `info as`).
      - In particular, the AVR Dependent Features section:
-       https://sourceware.org/binutils/docs/as/AVR_002dDependent.html#AVR_002dDependent
- - http://www.nongnu.org/avr-libc/user-manual/assembler.html
+       <https://sourceware.org/binutils/docs/as/AVR_002dDependent.html#AVR_002dDependent>
+ - <http://www.nongnu.org/avr-libc/user-manual/assembler.html>
    - Example of how to use avr-gcc and avr-libc for assembly.
