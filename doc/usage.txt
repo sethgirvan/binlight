@@ -37,6 +37,56 @@ Special function mode
    - Set Morse code buffer
    - Output from Morse code buffer
 
+   The special functions vbat_indicate, eeprom_read, and temp_indicate output
+   values in binary. From the documentation of the `indicate_bin` function those
+   special functions use internally:
+
+   > 0s are represented as a transition from 0% to 12.5% of SF_BRIGHT and 1s as
+   > a transition from 50% to 100% of SF_BRIGHT. Bits are output most
+   > significant bit first. For example for the sequence of
+   > 3 bits '011':
+   > | bit 2  |   bit 1    |  bit 0   |
+   > 0% - 12.5% - 50% - 100% - 50% - 100%
+   >
+   > This scale is used (versus something like 0% to 25% and 50% to 100%) to try
+   > to match humans' logarithmic-y perception of brightness.
+
+   Upon entering special function mode the bits '0101' are also immediately
+   output to let you know you are now in special function mode and to be ready
+   to select the special function. '0101' being output looks like a sequence of
+   the following brightness levels (as percentage of SF_BRIGHT):
+
+     |   0      |     1      |     0      |     1     |
+     0% - 12.5% - 50% - 100% - 0% - 12.5% - 50% - 100%
+
+   Then the light will flash three times. Turn the light off and back on during
+   each of those flashes to set that respective bit to 1. For example if you
+   turn the light off and back on during only the third and final flash, you
+   have selected special function '001': eeprom_read.
+
+ - vbat_indicate
+   Indicates the raw ADC voltage. If your battery sense connection is as
+   following:
+
+     V+ -- 19.1k -*- 4.7k -- GND
+                  \
+                   \__ADC
+
+   (with no diode in front of the divider), the voltage would be calculated as
+   $X/255 * 1.1 * (1 + 19.1/4.7)$ where $X$ is the value between $0$ and $255$
+   output by vbat_indicate. $1.1$ in the equation is the attiny's 1.1V internal
+   voltage reference.
+
+ - eeprom_write
+   First the light flashes 6 times to allow you to select any of the 64 bytes
+   of eeprom you want to overwrite. For example if you turn the light off and
+   back on during the first, third, fourth, and fifth flashes, you have selected
+   EEPROM address 101110 (hex 0x2E) which is the address of
+   EEP_HAND_WARMER_TEMP. Immediately after inputting the address you input the 8
+   bits of data you want to write to that address. For example if you input the
+   binary 01101010 (0x6A) you have set EEP_HAND_WARMER_TEMP to value 106, which
+   with the default component values corresponds to around 50 degrees Celsius.
+
  - off_time_set
    After activating this special function, turn off the light for the desired
    new off-time then turn the light back on. Note that you may not want to use
@@ -83,9 +133,12 @@ EEPROM data.
 
 To activate the unbrick function, turn the light on alternately for less than
 .5 (CFG_UNBRICK_ON_TIME_0) seconds followed by between .5 and 2
-(CFG_UNBRICK_ON_TIME_1) seconds a total of 64 (CFG_UNBRICK_PRESS_REQ) times (ie
+(CFG_UNBRICK_ON_TIME_1) seconds a total of 32 (CFG_UNBRICK_PRESS_REQ) times (ie
 turn the light on for less than .5 seconds then off then on between .5 and 2
-seconds then off, repeated 32 times). The unbrick function is based on on-time
+seconds then off, repeated 16 times). The unbrick function is based on on-time
 only because there is more that can go wrong with off-time measurement (and one
 can use this firmware in solely on-time mode with a driver that does not have an
 off-time measurement capacitor).
+
+The light indicates the pattern 1-1-0-0 when the unbrick function has
+successfully performed.
