@@ -41,9 +41,9 @@
 /* 0x2E EEP_HAND_WARMER_TEMP: Set temperature for the hand warmer special
  * function. This works the same way as EEP_OVERTEMP_THRESH, see eep_core.S.
  *
- * From the Murata NCU18XH103F60RB datasheet, it has a resistance of 3.535k at
- * 55 degC.
+ * From the TDK NTCG064EF104FTBX datasheet, it has a resistance of 33.19k at
+ * 50 degC.
  *
- * ADC value = 255 / (1 + 4.7k/3.535k) = ~109
+ * ADC value = 255 / (1 + 47k/33.19k) = ~106
  */
-.byte 109 /* 55 degC */
+.byte 106 /* 50 degC */
