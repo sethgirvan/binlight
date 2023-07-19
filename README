@@ -18,7 +18,13 @@ Features
    - battery voltage readout
    - read data at any location in EEPROM
    - write data to any EEPROM location
+   - temperature readout
+   - "hand warmer" mode to maintain target temperature
    - measure and set new off-time
+
+   The UI is pretty rough. Input and output is binary, and voltage and
+   temperature readouts are raw ADC values which you can then calculate the
+   voltage and temperature in degrees from based on component values used.
 
    By changing the bytes in EEPROM with the eeprom_write special function,
    almost all configuration values, including mode settings, can be changed on
