@@ -968,21 +968,21 @@ sf_switch:
 sf_jmp_tbl:
 	/* 8 user-selectable special functions
 	 * sf_state_retry_sel slots are currently unused */
-	/* 0 */ rjmp sf_state_vbat_indicate
-	/* 1 */ rjmp sf_state_eeprom_read
-	/* 2 */ rjmp sf_state_eeprom_write
-	/* 3 */ rjmp sf_state_retry_sel
-	/* 4 */ rjmp sf_state_temp_indicate
-	/* 5 */ rjmp sf_state_hand_warmer
-	/* 6 */ rjmp sf_state_retry_sel
-	/* 7 */ rjmp sf_state_off_time_set
+	/* 0x0 */ rjmp sf_state_vbat_indicate
+	/* 0x1 */ rjmp sf_state_eeprom_read
+	/* 0x2 */ rjmp sf_state_eeprom_write
+	/* 0x3 */ rjmp sf_state_retry_sel
+	/* 0x4 */ rjmp sf_state_temp_indicate
+	/* 0x5 */ rjmp sf_state_hand_warmer
+	/* 0x6 */ rjmp sf_state_retry_sel
+	/* 0x7 */ rjmp sf_state_off_time_set
 
 	/* Internal states */
-	/* 8 */ rjmp sf_state_init
-	/* 9 */ rjmp sf_state_fselect
-	/* A */ rjmp sf_state_retry_sel
-	/* B */ rjmp sf_state_eeprom_write_val
-	/* C */ rjmp sf_state_off_time_set_curr
+	/* 0x8 */ rjmp sf_state_init
+	/* 0x9 */ rjmp sf_state_fselect
+	/* 0xA */ rjmp sf_state_retry_sel
+	/* 0xB */ rjmp sf_state_eeprom_write_val
+	/* 0xC */ rjmp sf_state_off_time_set_curr
 
 
 /* Output pattern to indicate that special function selection will be retried.
